@@ -13,15 +13,20 @@ type dependency = Dependency of filename list;;
 type production = Production of target * dependency * command;;
 type program = Program of production list;;
 
-type md5 = MD5 of string;;
+type md5 = MDNone | MD5 of string;;
 type node = Empty | Node of filename * md5 * command * filename list;;
 type graph = Uninstantiated | Graph of md5 * node list;;
 
 exception MoreThanOneTargetException of string;;
 exception NodeCreationException of string;;
 
-let make_md5 (Filename(f)) = if f = "DEFAULT" then MD5("") else MD5(Digest.to_hex (Digest.file f));;
-let get_md5 (MD5(s)) = s;;
+let make_md5 (Filename(f)) = 
+	if f = "DEFAULT" then MDNone
+	else if Sys.file_exists f then MD5(Digest.to_hex (Digest.file f))
+	else MDNone;;
+let get_md5 = function
+ | MD5(s) -> s
+ | MDNone -> ""
 
 let make_serial_commands (Program(prod_list)) (target : filename) =
 	let targets = List.flatten (List.map (fun (Production(Target(file_list),_,_)) -> file_list) prod_list)
@@ -47,13 +52,45 @@ in  let rec get_commands_for_target (f : filename) (n : node list) =
 	| Node(_,_,cmd,dep_list) -> (List.flatten (List.map (fun a -> get_commands_for_target a n) dep_list)) @ [cmd]
 in get_commands_for_target target (make_node_list prod_list);;
 
-(* let exec_serial_commands (cmds : command list) = *)
+let old_dependencies =
+	let rec split_string s = 
+		try
+			let space_index = String.index s ' ' in
+			let first_half = String.sub s 0 space_index
+			and second_half = String.sub s (space_index + 1) (String.length s - space_index - 1) in
+			first_half::(split_string second_half)
+		with Not_found -> [s] 
+in	let read_old_deps =
+		let open_file = open_in ".remodel/history" in
+		try
+			let line = split_string (input_line open_file) in
+			let f::mds5 = line in
+
+				if String.sub !line 0 (String.index !line ' ') = f 
+				then switch := false
+				else ()
+			done;
+		with End_of_file -> line := "");
+		close_in open_file; "" (* do something with !line *)
+	try 
+		
+	with Sys_error(msg) -> (Printf.printf "%s" ("Warning : "^msg^"\n")); ""
+
+let exec f m (Command(cmd)) = 
+	if 
+	Sys.command cmd
+
+let rec exec_serial_commands = function
+ | [] -> []
+ | Node(Filename(f), _, Command(""), _)::t -> assert (Sys.file_exists f) ; exec_serial_commands t
+ | Node(f, m, c, _)::t -> exec f m c ; assert (Sys.file_exists f) ; exec_serial_commands t ;;
+
 
 let record_dependencies (Program(prod_list)) = 
 	let rec helper = function
-	| [] -> ""
-	| Production(Target([]), _, _)::t -> helper(t)
-	| Production(Target((Filename(f) as h)::t1), Dependency(l), cmd)::t2 -> 
+	 | [] -> ""
+	 | Production(Target([]), _, _)::t -> helper(t)
+	 | Production(Target((Filename(f) as h)::t1), Dependency(l), cmd)::t2 -> 
 		let concat_hashes a b = a^" "^b
 	in 	let make_md5s_for_deps = List.map (fun f -> get_md5 (make_md5 f)) l
 	in 	let prefix = if f = "DEFAULT" then f else f^" "^(get_md5 (make_md5 h))
@@ -86,6 +123,6 @@ in let target = match Array.length args with
 	| 1 -> Filename("DEFAULT") 
 	| 2 -> Filename(args.(1))
 	| _ -> 	raise (MultipleInitialTargetException "Multiple initial target values are not currently supported")
-in true;
+in exec_serial_commands (make_serial_commands example1 target) ; record_dependencies example1 ;;
 
  
