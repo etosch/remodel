@@ -55,33 +55,35 @@ and let insert_node (n : Node) (g : Graph) =
 
 
 (*	let helper s = match String.index *)
-in let get_old_dependencies (Filename(f)) =
-	try 
-		let open_file = open_in ".remodel/history" 
-		and line = ref("")
-		and switch = ref(true) in
-		(try 
-			while !switch
-			do
-				line := (input_line open_file);
+let old_dependencies =
+	let rec split_string s = 
+		try
+			let space_index = String.index s ' ' in
+			let first_half = String.sub s 0 space_index
+			and second_half = String.sub s (space_index + 1) (String.length s - space_index - 1) in
+			first_half::(split_string second_half)
+		with Not_found -> [s] 
+in	let read_old_deps =
+		let open_file = open_in ".remodel/history" in
+		try
+			let line = split_string (input_line open_file) in
+			let f::mds5 = line in
+
 				if String.sub !line 0 (String.index !line ' ') = f 
 				then switch := false
 				else ()
 			done;
 		with End_of_file -> line := "");
 		close_in open_file; "" (* do something with !line *)
-	with Sys_error(msg) -> (Printf.printf "%s" ("Warning : "^msg^"\n")); ""
-	(* Given a parsed representation of a REMODELFILE, spit out the md5 hashes and dependencies into .remodel/history *)
-
-	in let make_md5s line =
-	let split_string s = 
-		let space_index = String.index s ' ' in
-		let first_half = String.sub s 0 space_index
-		and second_half = String.sub s (space_index + 1) (String.length s - space_index - 1) in
-		(first_half, second_half)
-
-
+	try 
 		
+	with Sys_error(msg) -> (Printf.printf "%s" ("Warning : "^msg^"\n")); ""
+
+
+
+
+
+
 
 in let rec find_node_by_filename (f : filename) (n : node_list) =
 	if List.length n = 0
@@ -97,5 +99,15 @@ in let add_node (f : filename) (dep_list : dependency) (cmd : command) (g : Grap
 	in 
 		let dependency_node_list = List.map (fun f -> find_node_by_filename f n) dep_list
 		and 
+
+
+
+
+in  let rec unique_files = function
+	| (d, []) -> (d, [])
+	| (d, h::t) -> unique_files (h::d, (List.filter (fun f -> f <> h) t))
+in let rec all_files = function
+	| [] -> []
+	| Production(Target(l1),Dependency(l2),_)::t -> l1 @ l2 @ all_files(t)
 
 
