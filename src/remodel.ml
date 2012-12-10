@@ -17,9 +17,10 @@ type md5 = MDNone | MD5 of string;;
 type node = Empty | Node of filename * md5 * command * filename list;;
 type graph = Uninstantiated | Graph of md5 * node list;;
 
-exception MoreThanOneTargetException of string;;
-exception NodeCreationException of string;;
-exception CommandExecutionException of string;;
+exception TargetException of string;;
+exception NodeException of string;;
+exception CommandException of string;;
+exception DataIntegrityException of string;;
 
 let make_md5 (Filename(f)) = 
 	if f = "DEFAULT" then MDNone
@@ -28,30 +29,6 @@ let make_md5 (Filename(f)) =
 let get_md5 = function
  | MD5(s) -> s
  | MDNone -> ""
-
-let make_serial_commands (Program(prod_list)) (target : filename) =
-	let targets = List.flatten (List.map (fun (Production(Target(file_list),_,_)) -> file_list) prod_list)
-in	let rec make_node_list = function
- 	 | [] -> []	
- 	 | Production(Target([]), _, _)::t -> make_node_list t
- 	 | Production(Target(h::t1), Dependency(dep_list), cmd)::t2 -> 
-		Node(h, make_md5 h, cmd, dep_list)::make_node_list(Production(Target(t1), Dependency(dep_list), cmd)::t2)
-in  let is_valid_target (f : filename) = 
-	match List.filter (fun ff -> ff = f) targets with 
-	 | [] -> false
-	 | h::[] -> true
-	 | h::t -> let Filename(fname) = f in raise (MoreThanOneTargetException fname)
-in 	let rec get_from_node_list (f : filename) (n : node list)	=
-	match n with
-	 | [] -> Empty
-	 | (Node(ff,_,_,_) as h)::t when ff = f -> h
-	 | _::t -> get_from_node_list f t
-in  let rec get_commands_for_target (f : filename) (n : node list) =
-	match get_from_node_list f n with
-	| Empty -> []
-	| Node(_,_,cmd,[]) -> [cmd] 
-	| Node(_,_,cmd,dep_list) -> (List.flatten (List.map (fun a -> get_commands_for_target a n) dep_list)) @ [cmd]
-in 	assert (is_valid_target target) ; get_commands_for_target target (make_node_list prod_list);;
 
 let old_dependencies =
 	let rec split_string s = 
@@ -67,22 +44,54 @@ in	let open_file = open_in ".remodel/history" in
 			let line = split_string (input_line open_file) in
 			match line with
 			| [] -> []
-			| f::md5s -> (Filename(f), List.map (fun s -> MD5(s)) md5s)::(read_old_deps ())
+			| f::md5s -> (Filename(f), List.map (fun s -> if f = "DEFAULT" then MDNone else MD5(s)) md5s)::(read_old_deps ())
 		with End_of_file -> [] in
 	let dep_hash_alist = read_old_deps ()
-	in close_in open_file; dep_hash_alist;;
+	in close_in open_file; dep_hash_alist ;;
+
+let make_serial_commands (Program(prod_list)) (target : filename) =
+	let targets = List.flatten (List.map (fun (Production(Target(file_list),_,_)) -> file_list) prod_list) in
+	let rec make_node_list = function
+		| [] -> []	
+ 	 	| Production(Target([]), _, _)::t -> make_node_list t
+ 	 	| Production(Target(h::t1), Dependency(dep_list), cmd)::t2 -> 
+				Node(h, make_md5 h, cmd, dep_list)::make_node_list(Production(Target(t1), Dependency(dep_list), cmd)::t2) in
+	let is_valid_target (f : filename) = 
+		match List.filter (fun ff -> ff = f) targets with 
+	 	| [] -> false
+	 	| h::[] -> true
+	 	| h::t -> let Filename(fname) = f in raise (TargetException ("More than one target of "^fname)) in
+	let rec get_from_node_list (f : filename) (n : node list)	=
+		match n with
+	 	| [] -> Empty
+	 	| (Node(ff,_,_,_) as h)::t when ff = f -> h
+	 	| _::t -> get_from_node_list f t in
+	let rec get_commands_for_target (f : filename) (n : node list) =
+		match get_from_node_list f n with
+		| Empty -> []
+		| Node(_,_,cmd,[]) as nn -> [nn] 
+		| Node(_,_,cmd,dep_list) as nn -> (List.flatten (List.map (fun a -> get_commands_for_target a n) dep_list)) @ [nn] in
+	let rec get_old_hashes (f : filename) (hashes : (filename * md5 list) list) = 
+		match hashes with
+		| [] -> raise (DataIntegrityException "Hash not found")
+		| (ff, md5s)::t when ff = f -> md5s
+		| h::t -> get_old_hashes f t
+in 	assert (is_valid_target target) ; get_commands_for_target target (make_node_list prod_list);;
+
+
 
 let exec f m (Command(cmd)) = 
-	Sys.command cmd;
+	Sys.command cmd;;
 
-let rec exec_serial_commands = function
- | [] -> []
- | Node(Filename(f), _, Command(""), _)::t -> assert (Sys.file_exists f) ; exec_serial_commands t
- | Node(Filename(fname) as f, m, c, _)::t -> 
- 	if exec f m c = 0 
- 	then assert (Sys.file_exists fname) ; exec_serial_commands t
- 	else raise (CommandExecutionException "Something went wrong in exec; Sys.command returned value other than 0.")
-
+let exec_serial_commands (node_list : node list)= 
+	let rec helper = function
+ 	 | [] | Empty::_ -> []
+ 	 | Node(Filename("DEFAULT"), _, Command(""), _)::t -> helper t
+ 	 | Node(Filename(fname) as f, m, c, _)::t -> 
+			if exec f m c <> 0
+ 			then raise (CommandException "Error executing command : Nonzero exit code")
+ 			else assert (Sys.file_exists fname) ; helper t
+ 	in let _ = helper node_list in ();;
 
 let record_dependencies (Program(prod_list)) = 
 	let rec helper = function
@@ -96,10 +105,6 @@ let record_dependencies (Program(prod_list)) =
 in 	let deps = helper prod_list 
 and history = open_out ".remodel/history"
 in 	output_string history deps; close_out history;; 
-
-
-exception MultipleInitialTargetException of string;;
-
 
 (* let test_suite (arg : unit) = *)
 	let example1 = Program([Production(Target([Filename("DEFAULT")]), Dependency([Filename("baz")]), Command("")) ;
@@ -120,7 +125,7 @@ let args = Sys.argv
 in let target = match Array.length args with
 	| 1 -> Filename("DEFAULT") 
 	| 2 -> Filename(args.(1))
-	| _ -> 	raise (MultipleInitialTargetException "Multiple initial target values are not currently supported")
+	| _ -> 	raise (TargetException "Multiple initial target values are not currently supported")
 in exec_serial_commands (make_serial_commands example1 target) ; record_dependencies example1 ;;
 
  
