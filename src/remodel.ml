@@ -19,6 +19,7 @@ type graph = Uninstantiated | Graph of md5 * node list;;
 
 exception MoreThanOneTargetException of string;;
 exception NodeCreationException of string;;
+exception CommandExecutionException of string;;
 
 let make_md5 (Filename(f)) = 
 	if f = "DEFAULT" then MDNone
@@ -50,7 +51,7 @@ in  let rec get_commands_for_target (f : filename) (n : node list) =
 	| Empty -> []
 	| Node(_,_,cmd,[]) -> [cmd] 
 	| Node(_,_,cmd,dep_list) -> (List.flatten (List.map (fun a -> get_commands_for_target a n) dep_list)) @ [cmd]
-in get_commands_for_target target (make_node_list prod_list);;
+in 	assert (is_valid_target target) ; get_commands_for_target target (make_node_list prod_list);;
 
 let old_dependencies =
 	let rec split_string s = 
@@ -60,30 +61,27 @@ let old_dependencies =
 			and second_half = String.sub s (space_index + 1) (String.length s - space_index - 1) in
 			first_half::(split_string second_half)
 		with Not_found -> [s] 
-in	let read_old_deps =
-		let open_file = open_in ".remodel/history" in
+in	let open_file = open_in ".remodel/history" in
+	let rec read_old_deps () =
 		try
 			let line = split_string (input_line open_file) in
-			let f::mds5 = line in
-
-				if String.sub !line 0 (String.index !line ' ') = f 
-				then switch := false
-				else ()
-			done;
-		with End_of_file -> line := "");
-		close_in open_file; "" (* do something with !line *)
-	try 
-		
-	with Sys_error(msg) -> (Printf.printf "%s" ("Warning : "^msg^"\n")); ""
+			match line with
+			| [] -> []
+			| f::md5s -> (Filename(f), List.map (fun s -> MD5(s)) md5s)::(read_old_deps ())
+		with End_of_file -> [] in
+	let dep_hash_alist = read_old_deps ()
+	in close_in open_file; dep_hash_alist;;
 
 let exec f m (Command(cmd)) = 
-	if 
-	Sys.command cmd
+	Sys.command cmd;
 
 let rec exec_serial_commands = function
  | [] -> []
  | Node(Filename(f), _, Command(""), _)::t -> assert (Sys.file_exists f) ; exec_serial_commands t
- | Node(f, m, c, _)::t -> exec f m c ; assert (Sys.file_exists f) ; exec_serial_commands t ;;
+ | Node(Filename(fname) as f, m, c, _)::t -> 
+ 	if exec f m c = 0 
+ 	then assert (Sys.file_exists fname) ; exec_serial_commands t
+ 	else raise (CommandExecutionException "Something went wrong in exec; Sys.command returned value other than 0.")
 
 
 let record_dependencies (Program(prod_list)) = 
