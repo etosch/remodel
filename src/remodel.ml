@@ -119,8 +119,10 @@ in  output_string history deps; close_out history;;
 let example1 = Program([Production(Target([Filename("DEFAULT")]), Dependency([Filename("baz")]), Command("")) ;
               Production(Target([Filename("baz")]), Dependency([Filename("foo.o") ; Filename("bar.o")]), Command("g++ foo.o bar.o -o baz")) ;
               Production(Target([Filename("foo.o")]), Dependency([Filename("foo.cpp")]), Command("g++ -c foo.cpp -o foo.o")) ;
-              Production(Target([Filename("bar.o")]), Dependency([Filename("bar.cpp")]), Command("g++ -c bar.cpp -o bar.o"))
-              Production(Target([Filename("a.txt");Filename("b.txt")]), Dependency([Filename()]))
+              Production(Target([Filename("bar.o")]), Dependency([Filename("bar.cpp")]), Command("g++ -c bar.cpp -o bar.o")) ;
+              Production(Target([Filename("existence.ml")]), Dependency([Filename("a.txt")]), Command("ocamlc -o existence existence.ml ; ./existence < \"a.txt\"")) ;
+              Production(Target([Filename("a.txt") ; Filename("b.txt")]), Dependency([Filename("do.sh")]), Command("chmod +x do.sh ; ./do.sh")) ;
+              Production(Target([Filename("do.sh")]), Dependency([]), Command("echo \"touch a.txt; touch b.txt\" > do.sh"))
               ]) ;;
 (* in record_dependencies example1 *)
 (* 
