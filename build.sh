@@ -1,19 +1,16 @@
 #!/bin/sh
-# set -e
-rm -rf .remodel
+set -e
 rm -rf tests
 mkdir tests
+
 cd tests
-if [[ -e bar.o && -e bar.cpp && -e foo.o && -e foo.cpp && -e baz ]]
-	then rm bar* foo* baz
-fi
 printf "#include <iostream>\nvoid foo() { std::cout << \"Hello, foo!\"; }" > foo.cpp
 printf "#include <iostream>\nextern int foo (); void bar() { std::cout << \"Hello, bar!\"; } int main() { foo(); bar(); return 0; }" > bar.cpp
-printf "output_value stdout (Sys.file_exists (input_line stdin))" > existence.ml
+printf "output_string stdout (string_of_bool (Sys.file_exists \"a.txt\"))" > existence.ml
 cd ..
+
 ocamlopt unix.cmxa -o remodel src/remodel.ml 
 PATH=$PATH:`pwd`
-
 cd tests
 remodel
 # grab md5s of bar.o and bar.cpp - these should not change after running
@@ -55,10 +52,9 @@ foo2=`md5 -q foo.o`
 baz=`md5 -q baz`
 
 printf "Test case 4 : dual targets and a target with a command and no dependencies on existence.ml..."
-remodel existence.ml 2> test4 1> out4
+remodel existence 2> test4 1> out4
 a=`wc -l test4 | awk '{print $1}'`
-b=`wc -l out4 | awk '{print $1}'`
-if [[ $a -lt 2 && -e do.sh && -e a.txt && -e b.txt && $b -gt 1 ]]
+if [[ $a -lt 2 && -e do.sh && -e a.txt && -e b.txt ]]
 	then echo "PASS"
 else echo "FAIL"
 fi

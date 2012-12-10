@@ -84,16 +84,18 @@ let make_serial_commands (Program(prod_list)) (target : filename) =
     | Node(_,_,cmd,dep_hash_list) as nn -> (List.flatten (List.map (fun (a,_) -> get_commands_for_target a n) dep_hash_list)) @ [nn] 
   in assert (is_valid_target target) ; get_commands_for_target target (make_node_list prod_list);;
 
-let exec = function
-  | Empty -> -1 (* something went horribly awry? *)
-  | Node(f, m, Command(c), []) ->
-      if make_md5 f <> m then Sys.command c else 0
-  | Node(f,m,Command(cmd),dep_hash_alist) ->
-      if (List.for_all (fun (fname, hash) -> make_md5 fname = hash) ((f, m)::dep_hash_alist))
-      then 0
-      else Sys.command cmd;;
 
-let exec_serial_commands (node_list : node list)= 
+let exec (n : node) = 
+  let run_cmd (Command(cmd)) = 
+    (* Printf.printf "%s\n" cmd ; *)
+    Sys.command cmd in
+  match n with
+  | Empty -> -1 (* something went horribly awry? *)
+  | Node(f, m, c, []) -> if make_md5 f <> m then run_cmd c else 0
+  | Node(f,m,c,dep_hash_alist) -> if (List.for_all (fun (fname, hash) -> make_md5 fname = hash) ((f, m)::dep_hash_alist))
+      then 0 else run_cmd c;;
+
+let exec_serial_commands (node_list : node list) = 
   let rec helper = function
    | [] | Empty::_ -> []
    | Node(Filename("DEFAULT"), _, Command(""), _)::t -> helper t
@@ -120,17 +122,10 @@ let example1 = Program([Production(Target([Filename("DEFAULT")]), Dependency([Fi
               Production(Target([Filename("baz")]), Dependency([Filename("foo.o") ; Filename("bar.o")]), Command("g++ foo.o bar.o -o baz")) ;
               Production(Target([Filename("foo.o")]), Dependency([Filename("foo.cpp")]), Command("g++ -c foo.cpp -o foo.o")) ;
               Production(Target([Filename("bar.o")]), Dependency([Filename("bar.cpp")]), Command("g++ -c bar.cpp -o bar.o")) ;
-              Production(Target([Filename("existence.ml")]), Dependency([Filename("a.txt")]), Command("ocamlc -o existence existence.ml ; ./existence < \"a.txt\"")) ;
+              Production(Target([Filename("existence")]), Dependency([Filename("existence.ml") ; Filename("a.txt")]), Command("ocamlc -o existence existence.ml ; ./existence")) ;
               Production(Target([Filename("a.txt") ; Filename("b.txt")]), Dependency([Filename("do.sh")]), Command("chmod +x do.sh ; ./do.sh")) ;
               Production(Target([Filename("do.sh")]), Dependency([]), Command("echo \"touch a.txt; touch b.txt\" > do.sh"))
               ]) ;;
-(* in record_dependencies example1 *)
-(* 
-  let Program(prod_list) = example1
-  in let nodes = make_node_list prod_list
-  in get_commands_for_target (Filename("DEFAULT")) nodes ;;
-*)
-
 
 (* program entry *)
 let args = Sys.argv 
