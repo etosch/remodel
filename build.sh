@@ -12,6 +12,7 @@ printf "#include <iostream>\nextern int foo (); void bar() { std::cout << \"Hell
 cd ..
 ocamlopt unix.cmxa -o remodel src/remodel.ml 
 PATH=$PATH:`pwd`
+
 cd tests
 remodel
 # grab md5s of bar.o and bar.cpp - these should not change after running
@@ -39,11 +40,11 @@ if [[ $a -lt 2 && $bar1 == `md5 -q bar.cpp` && $bar2 == `md5 -q bar.o` && $foo2 
 else echo "FAIL"
 fi
 
-printf "Test case 3 : restore foo.cpp and run remodel on default..."
-printf "#include <iostream>\nvoid foo() { std::cout << \"Hello, foo!\"; }" > foo.cpp
+printf "Test case 3 : rewrite foo.cpp and run remodel on default..."
+printf "#include <iostream>\nvoid foo() { std::cout << \"Yo, foo!\"; }" > foo.cpp
 remodel
 a=`wc -l test1 | awk '{print $1}'`
-if [[ $a -lt 2 && `md5 -q bar.cpp` == $bar1 && `md5 -q bar.o` == $bar2 && `md5 -q foo.cpp` != $foo1 && `md5 -q foo.o` != $foo2 && `md5 -q baz` == $baz ]]
+if [[ $a -lt 2 && `md5 -q bar.cpp` == $bar1 && `md5 -q bar.o` == $bar2 && `md5 -q foo.cpp` != $foo1 && `md5 -q foo.o` != $foo2 && `md5 -q baz` != $baz ]]
 	then echo "PASS"
 else echo "FAIL"
 fi
