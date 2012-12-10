@@ -1,6 +1,12 @@
-# make examples
+#!/bin/sh
+set -e
+rm -rf .remodel
+rm -rf tests
+mkdir tests
 cd tests
-rm bar* foo* baz
+if [[ -e bar.o && -e bar.cpp && -e foo.o && -e foo.cpp && -e baz ]]
+	then rm bar* foo* baz
+fi
 printf "#include <iostream>\nvoid foo() { std::cout << \"Hello, foo!\"; }" > foo.cpp
 printf "#include <iostream>\nextern int foo (); void bar() { std::cout << \"Hello, bar!\"; } int main() { foo(); bar(); return 0; }" > bar.cpp
 cd ..

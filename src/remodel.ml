@@ -1,10 +1,11 @@
 (* Future Improvements? *)
 (* 1. When handling multiple dependencies/targets, always sort - i.e. don't just use them in the same order as the REMODELFILE? *)
-
-try 
-	Unix.mkdir ".remodel" 0o755 ;
-	Unix.close (Unix.openfile ".remodel/history" [Unix.O_CREAT] 0o755) ; 
-with Unix.Unix_error(_,_,_) -> ();;
+if not (Sys.file_exists ".remodel")
+then Unix.mkdir ".remodel" 0o755
+else ();;
+if not (Sys.file_exists ".remodel/history")
+then let o = open_out ".remodel/history" in output_string o ""; close_out o
+else ()	;;
 
 type command = Command of string;;
 type filename = Filename of string;;
@@ -14,7 +15,7 @@ type production = Production of target * dependency * command;;
 type program = Program of production list;;
 
 type md5 = MDNone | MD5 of string;;
-type node = Empty | Node of filename * md5 * command * filename list;;
+type node = Empty | Node of filename * md5 * command * (filename * md5) list;;
 type graph = Uninstantiated | Graph of md5 * node list;;
 
 exception TargetException of string;;
@@ -26,6 +27,7 @@ let make_md5 (Filename(f)) =
 	if f = "DEFAULT" then MDNone
 	else if Sys.file_exists f then MD5(Digest.to_hex (Digest.file f))
 	else MDNone;;
+
 let get_md5 = function
  | MD5(s) -> s
  | MDNone -> ""
@@ -51,11 +53,20 @@ in	let open_file = open_in ".remodel/history" in
 
 let make_serial_commands (Program(prod_list)) (target : filename) =
 	let targets = List.flatten (List.map (fun (Production(Target(file_list),_,_)) -> file_list) prod_list) in
+	let rec get_old_hashes (f : filename) (hashes : (filename * md5 list) list) = 
+		match hashes with
+		| [] -> [MDNone]
+		| (ff, md5s)::t when ff = f -> md5s
+		| h::t -> get_old_hashes f t in
 	let rec make_node_list = function
 		| [] -> []	
  	 	| Production(Target([]), _, _)::t -> make_node_list t
  	 	| Production(Target(h::t1), Dependency(dep_list), cmd)::t2 -> 
-				Node(h, make_md5 h, cmd, dep_list)::make_node_list(Production(Target(t1), Dependency(dep_list), cmd)::t2) in
+ 	 			let old_hashes = get_old_hashes h old_dependencies in
+ 	 			let (this_hash, dep_hashes) = if List.length old_hashes <> List.length dep_list + 1
+ 	 																		then (MDNone, List.map (fun _ -> MDNone) dep_list)
+															 	 			else (List.hd old_hashes, List.tl old_hashes) in
+				Node(h, this_hash, cmd, List.map2 (fun a b -> (a, b)) dep_list dep_hashes)::make_node_list(Production(Target(t1), Dependency(dep_list), cmd)::t2) in
 	let is_valid_target (f : filename) = 
 		match List.filter (fun ff -> ff = f) targets with 
 	 	| [] -> false
@@ -70,28 +81,27 @@ let make_serial_commands (Program(prod_list)) (target : filename) =
 		match get_from_node_list f n with
 		| Empty -> []
 		| Node(_,_,cmd,[]) as nn -> [nn] 
-		| Node(_,_,cmd,dep_list) as nn -> (List.flatten (List.map (fun a -> get_commands_for_target a n) dep_list)) @ [nn] in
-	let rec get_old_hashes (f : filename) (hashes : (filename * md5 list) list) = 
-		match hashes with
-		| [] -> raise (DataIntegrityException "Hash not found")
-		| (ff, md5s)::t when ff = f -> md5s
-		| h::t -> get_old_hashes f t
-in 	assert (is_valid_target target) ; get_commands_for_target target (make_node_list prod_list);;
+		| Node(_,_,cmd,dep_hash_list) as nn -> (List.flatten (List.map (fun (a,_) -> get_commands_for_target a n) dep_hash_list)) @ [nn] 
+	in assert (is_valid_target target) ; get_commands_for_target target (make_node_list prod_list);;
 
-
-
-let exec f m (Command(cmd)) = 
-	Sys.command cmd;;
+let exec = function
+	| Empty -> -1 (* something went horribly awry? *)
+	| Node(f, m, Command(c), []) ->
+			if make_md5 f <> m then Sys.command c else 0
+	| Node(f,m,Command(cmd),dep_hash_alist) ->
+			if (List.for_all (fun (fname, hash) -> make_md5 fname = hash) ((f, m)::dep_hash_alist))
+			then 0
+			else Sys.command cmd;;
 
 let exec_serial_commands (node_list : node list)= 
 	let rec helper = function
  	 | [] | Empty::_ -> []
  	 | Node(Filename("DEFAULT"), _, Command(""), _)::t -> helper t
- 	 | Node(Filename(fname) as f, m, c, _)::t -> 
-			if exec f m c <> 0
- 			then raise (CommandException "Error executing command : Nonzero exit code")
- 			else assert (Sys.file_exists fname) ; helper t
- 	in let _ = helper node_list in ();;
+ 	 | Node(Filename(fname),_,_,_) as n::t -> 
+ 	 		if exec n <> 0 
+ 	 		then raise (CommandException "Error executing command : Nonzero exit code")
+ 			else assert (Sys.file_exists fname) ; helper t in
+ 	let _ = helper node_list in ();;
 
 let record_dependencies (Program(prod_list)) = 
 	let rec helper = function
