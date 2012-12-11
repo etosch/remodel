@@ -111,24 +111,27 @@ let exec_parallel_commands (Program(prod_list)) (target : filename) =
     | [] -> Empty
     | (Node(ff,_,_,_) as h)::t when ff = f -> h
     | _::t -> get_from_node_list f t in
+  let exec (n : node) pid = 
+    let run_cmd (Node(Filename(fname) as f, m, Command(cmd),_)) =
+      Printf.printf "target:%s\tmd5_old:%s\tmd5_new:%s\tcmd:%s\tpid:%d\n" fname (get_md5 m) (get_md5 (make_md5 f)) cmd pid ; 
+      Sys.command cmd in
+    match n with
+    | Empty -> -1 (* something went horribly awry? *)
+    | Node(f, m, c, []) -> if make_md5 f <> m then run_cmd n else 0
+    | Node(f,m,c,dep_hash_alist) -> 
+      if (List.for_all (fun (fname, hash) -> make_md5 fname = hash) ((f, m)::dep_hash_alist))then 0 else run_cmd n in
   let rec exec_commands (f : filename) (n : node list) =
-    (* Printf.printf "%d\n" (Unix.getpid()) ; (* These print ok *) *)
     match get_from_node_list f n with
     | Empty -> []
-    | Node(_,_,Command(cmd),[]) as nn -> Printf.printf "%s" cmd ; ignore(Sys.command cmd) ; [nn] 
-    | Node(_,_,Command(cmd),dep_hash_alist) as nn -> 
-(*      Printf.printf "Waiting to execute %s:%d\n" cmd (Unix.getpid()); *)
+    | Node(_,_,Command(cmd),[]) as nn -> ignore (exec nn (Unix.getpid ())) ; [nn] 
+    | Node(Filename(fname),m,Command(cmd),dep_hash_alist) as nn -> 
       match Unix.fork() with
       | 0 -> (List.flatten (List.map (fun (a,_) -> exec_commands a n) dep_hash_alist)) @ [nn](* waiting for dependencies to return *)
-      | pid -> ignore(Unix.waitpid [] pid) ; Printf.printf "cmd:%s\tpid:%d\n" cmd pid ; ignore(Sys.command cmd) ;
+      | pid -> ignore (Unix.waitpid [] pid) ; ignore (exec nn (Unix.getpid ())) ;
         (List.flatten (List.map (fun (a,_) -> exec_commands a n) dep_hash_alist)) @ [nn]
-      (*                      match Unix.fork() with 
-                            | 0 -> exec_commands a n 
-                            | pid -> ignore(Unix.wait()) ; []) 
-*)
   in assert (is_valid_target target) ; exec_commands target (make_node_list prod_list);; 
 
-
+(* 
 let exec (n : node) = 
   let run_cmd (Command(cmd)) = 
     (* Printf.printf "%s\n" cmd ; *)
@@ -138,7 +141,8 @@ let exec (n : node) =
   | Node(f, m, c, []) -> if make_md5 f <> m then run_cmd c else 0
   | Node(f,m,c,dep_hash_alist) -> if (List.for_all (fun (fname, hash) -> make_md5 fname = hash) ((f, m)::dep_hash_alist))
       then 0 else run_cmd c;;
-
+    *)
+(*
 let exec_serial_commands (node_list : node list) = 
   let rec helper = function
    | [] | Empty::_ -> []
@@ -148,6 +152,7 @@ let exec_serial_commands (node_list : node list) =
       then raise (CommandException "Error executing command : Nonzero exit code")
       else if Sys.file_exists fname then helper t else raise (CommandException ("Command "^cmd^" failed to execute; file "^fname^" not created.")) in
   let _ = helper node_list in ();;
+*)
 
 let record_dependencies (Program(prod_list)) = 
   let rec helper = function
