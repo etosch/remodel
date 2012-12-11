@@ -16,18 +16,19 @@ remodel
 # grab md5s of bar.o and bar.cpp - these should not change after running
 # check whether this machine has md5 on it
 bar1=`md5 -q bar.cpp`
-bar2=`md5 -q bar.o`
 foo1=`md5 -q foo.cpp`
-foo2=`md5 -q foo.o`
-baz=`md5 -q baz`
 
 printf "Test case 1 : run DEFAULT for the first time..."
 remodel 2> test1
 a=`wc -l test1 | awk '{print $1}'`
-if [[ $a -gt 1 ]]
+if [[ $a -gt 1 || !( -e bar.o )  || !( -e foo.o ) || !( -e baz ) ]]
 	then echo "FAIL"
 else echo "PASS"
 fi
+
+bar2=`md5 -q bar.o`
+foo2=`md5 -q foo.o`
+baz=`md5 -q baz`
 
 printf "Test case 2 : remove foo.cpp and run remodel on bar.o..."
 rm foo.cpp

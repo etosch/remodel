@@ -1,5 +1,6 @@
 (* Future Improvements? *)
 (* 1. When handling multiple dependencies/targets, always sort - i.e. don't just use them in the same order as the REMODELFILE? *)
+(* 2. Check that the hashes of the dependencies match the hashes of their targets -> i.e. make sure that the build didn't get screwed up *)
 if not (Sys.file_exists ".remodel")
 then Unix.mkdir ".remodel" 0o755
 else ();;
@@ -80,9 +81,52 @@ let make_serial_commands (Program(prod_list)) (target : filename) =
   let rec get_commands_for_target (f : filename) (n : node list) =
     match get_from_node_list f n with
     | Empty -> []
-    | Node(_,_,cmd,[]) as nn -> [nn] 
+    | Node(_,_,_,[]) as nn -> [nn] 
     | Node(_,_,cmd,dep_hash_list) as nn -> (List.flatten (List.map (fun (a,_) -> get_commands_for_target a n) dep_hash_list)) @ [nn] 
-  in assert (is_valid_target target) ; get_commands_for_target target (make_node_list prod_list);;
+ in assert (is_valid_target target) ; get_commands_for_target target (make_node_list prod_list);;
+
+let exec_parallel_commands (Program(prod_list)) (target : filename) =
+  let targets = List.flatten (List.map (fun (Production(Target(file_list),_,_)) -> file_list) prod_list) in
+  let rec get_old_hashes (f : filename) (hashes : (filename * md5 list) list) = 
+    match hashes with
+    | [] -> [MDNone]
+    | (ff, md5s)::t when ff = f -> md5s
+    | h::t -> get_old_hashes f t in
+  let rec make_node_list = function
+    | [] -> []  
+    | Production(Target([]), _, _)::t -> make_node_list t
+    | Production(Target(h::t1), Dependency(dep_list), cmd)::t2 -> 
+        let old_hashes = get_old_hashes h old_dependencies in
+        let (this_hash, dep_hashes) = if List.length old_hashes <> List.length dep_list + 1
+                                      then (MDNone, List.map (fun _ -> MDNone) dep_list)
+                                      else (List.hd old_hashes, List.tl old_hashes) in
+        Node(h, this_hash, cmd, List.map2 (fun a b -> (a, b)) dep_list dep_hashes)::make_node_list(Production(Target(t1), Dependency(dep_list), cmd)::t2) in
+  let is_valid_target (f : filename) = 
+    match List.filter (fun ff -> ff = f) targets with 
+    | [] -> false
+    | h::[] -> true
+    | h::t -> let Filename(fname) = f in raise (TargetException ("More than one target of "^fname)) in
+  let rec get_from_node_list (f : filename) (n : node list) =
+    match n with
+    | [] -> Empty
+    | (Node(ff,_,_,_) as h)::t when ff = f -> h
+    | _::t -> get_from_node_list f t in
+  let rec exec_commands (f : filename) (n : node list) =
+    (* Printf.printf "%d\n" (Unix.getpid()) ; (* These print ok *) *)
+    match get_from_node_list f n with
+    | Empty -> []
+    | Node(_,_,Command(cmd),[]) as nn -> Printf.printf "%s" cmd ; ignore(Sys.command cmd) ; [nn] 
+    | Node(_,_,Command(cmd),dep_hash_alist) as nn -> 
+(*      Printf.printf "Waiting to execute %s:%d\n" cmd (Unix.getpid()); *)
+      match Unix.fork() with
+      | 0 -> (List.flatten (List.map (fun (a,_) -> exec_commands a n) dep_hash_alist)) @ [nn](* waiting for dependencies to return *)
+      | pid -> ignore(Unix.waitpid [] pid) ; Printf.printf "cmd:%s\tpid:%d\n" cmd pid ; ignore(Sys.command cmd) ;
+        (List.flatten (List.map (fun (a,_) -> exec_commands a n) dep_hash_alist)) @ [nn]
+      (*                      match Unix.fork() with 
+                            | 0 -> exec_commands a n 
+                            | pid -> ignore(Unix.wait()) ; []) 
+*)
+  in assert (is_valid_target target) ; exec_commands target (make_node_list prod_list);; 
 
 
 let exec (n : node) = 
@@ -133,6 +177,6 @@ in let target = match Array.length args with
   | 1 -> Filename("DEFAULT") 
   | 2 -> Filename(args.(1))
   | _ ->  raise (TargetException "Multiple initial target values are not currently supported")
-in exec_serial_commands (make_serial_commands example1 target) ; record_dependencies example1 ;;
+in ignore(exec_parallel_commands example1 target) ; record_dependencies example1 ;;
 
  
