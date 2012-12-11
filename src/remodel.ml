@@ -24,6 +24,7 @@ exception TargetException of string;;
 exception NodeException of string;;
 exception CommandException of string;;
 exception DataIntegrityException of string;;
+exception ParseException of string;;
 
 let make_md5 (Filename(f)) = 
   if f = "DEFAULT" then MDNone
@@ -115,7 +116,6 @@ let record_dependencies (Program(prod_list)) =
   and history = open_out ".remodel/history" in
   output_string history deps; close_out history;; 
 
-(* replace with ocamllex & ocamlyacc *)
 let example1 = Program([Production(Target([Filename("DEFAULT")]), Dependency([Filename("baz")]), Command("")) ;
               Production(Target([Filename("baz")]), Dependency([Filename("foo.o") ; Filename("bar.o")]), Command("g++ foo.o bar.o -o baz")) ;
               Production(Target([Filename("foo.o")]), Dependency([Filename("foo.cpp")]), Command("g++ -c foo.cpp -o foo.o")) ;
@@ -124,6 +124,71 @@ let example1 = Program([Production(Target([Filename("DEFAULT")]), Dependency([Fi
               Production(Target([Filename("a.txt") ; Filename("b.txt")]), Dependency([Filename("do.sh")]), Command("chmod +x do.sh ; ./do.sh")) ;
               Production(Target([Filename("do.sh")]), Dependency([]), Command("echo \"touch a.txt; touch b.txt\" > do.sh"))
               ]) ;;
+
+(* type lexeme = Lint of int | Lident of string;;
+type token = FileTok of string | CmdTok of string ;;
+let remodelfile_lexer l = Genlex.make_lexer ["<-" ; ":" ; ","] (Stream.of_string l) ;; *)
+(* naive approach for now *)
+type direction = Front | Back ;;
+
+let parse_remodelfile () =
+  let is_whitespace = function
+    | ' ' | '\012' | '\n' | '\r' | '\t' -> true
+    | _ -> false 
+  and contains_whitespace s = 
+    let f = String.contains s in
+    f ' ' || f '\012' || f 'n' || f '\r' || f '\t' in
+  let rec trim s = 
+    let trim_one s d = match d with
+      | Front -> String.sub s 1 (String.length s - 1) 
+      | Back -> String.sub s 0 (String.length s - 1) in
+    match (is_whitespace s.[0], is_whitespace s.[String.length s - 1]) with
+    | (true, true) -> trim (trim_one (trim_one s Front) Back)
+    | (true, false) -> trim (trim_one s Front)
+    | (false, true) -> trim (trim_one s Back)
+    | (false, false) -> s in
+  let rec string_split target delim = 
+    let get_chunk str = 
+      try
+        let i = String.index str delim in
+        (String.sub str 0 i, i+1) 
+      with Not_found -> (str, -1) in
+    match get_chunk target with
+    | ("", _) -> [] 
+    | (chunk, -1) -> [chunk] 
+    | (chunk, i) -> chunk :: (string_split (String.sub target i ((String.length target) - i)) delim) in
+  let string_partition_at_index target i =
+    (String.sub target 0 i, String.sub target i (String.length target - i)) in
+  let buf = Buffer.create 80 
+  and prod_list = ref([])
+  and f = open_in "REMODELFILE" in
+  (try
+    let get_next_target buf =
+      (* get the substring of things before the <-. then split on commas. then check each substr for spaces. return the target of filenames and update the buffer *)
+      let rec read_for_arrow () =
+        while not (String.contains (Buffer.contents buf) '-')
+        do Buffer.add_string buf (input_line f) done;
+        if (String.contains (Buffer.contents buf) '<') && (String.index (Buffer.contents buf) '-') - (String.index (Buffer.contents buf) '<') = 1
+        then (String.index (Buffer.contents buf) '<')
+        else read_for_arrow () in
+      let (target_string, new_buffer_contents) = string_partition_at_index (Buffer.contents buf) (read_for_arrow ()) in
+      let targets = List.map trim (string_split target_string ',') in
+      ignore (List.map (fun t -> Printf.printf "%sx\n" t) targets) ;
+      assert (List.for_all (fun s -> not (contains_whitespace s)) targets) ; 
+      Buffer.clear buf ; Buffer.add_string buf new_buffer_contents ;
+      Target (List.map (fun f -> Filename(f)) targets) 
+    and get_next_deps buf = Dependency([]) 
+    and get_next_cmd buf = Command("") in
+(*    while true do *)
+      let target = get_next_target buf in
+      let deps = get_next_deps buf in
+      let cmd = get_next_cmd buf in
+      prod_list := Production(target, deps, cmd)::(!prod_list)
+(*    done;  *)
+  with
+  | End_of_file -> if Buffer.contents buf = "" then () else raise (ParseException "Incomplete production."));
+  close_in f ; Program(!prod_list);;
+
 (* program entry *)
 let args = Sys.argv 
 in let target = match Array.length args with
