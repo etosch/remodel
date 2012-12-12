@@ -7,8 +7,12 @@ then Unix.mkdir ".remodel" 0o755
 else ();;
 if not (Sys.file_exists ".remodel/history") 
 then let o = open_out ".remodel/history" in output_string o "" ; close_out o else () ;;
-(* let o = open_out ".remodel/logdone" in output_string o "" ; close_out o;; *)
-Sys.command "echo \"\" > .remodel/logdone";;
+
+let asdf () =
+  let o = open_out ".remodel/logdone" in 
+    output_string o "" ; close_out o ;;
+ 
+ 
 
 type command = Command of string;;
 type filename = Filename of string;;
@@ -64,7 +68,6 @@ let string_partition_at_index target i =
   if String.length target > i 
   then (String.sub target 0 i, String.sub target i (String.length target - i))
   else (target, "")
-
 
 let make_md5 (Filename(f)) = 
   if f = "DEFAULT" then MDNone
@@ -124,8 +127,8 @@ let exec_parallel_commands (Program(prod_list)) (target : filename) =
     let b = ref(false)
     and l = open_in ".remodel/logdone" in
     while (not !b) do
-      try b := trim (input_line l) = fname; with End_of_file -> ();
-    done; !b in
+      try b := input_line l = fname; with End_of_file -> ();
+    done; close_in l ; !b in
   let log_done (f : filename) (Command(cmd)) = 
     if already_executed f 
     then raise (SynchError ("Already executed "^cmd)) (* this isn't atomic, so who knows if it works? *)
@@ -139,10 +142,10 @@ let exec_parallel_commands (Program(prod_list)) (target : filename) =
       | Empty -> raise (NodeException "Empty node passed to run_cmd; this is VERY BAD")
       | Node(f,m,c,_) ->
         let Filename(fname) = f and Command(cmd) = c in
-        if already_executed f then ()
-        else (* wait until the last possible minute to check if it's already executed *)
+        (* if already_executed f then () else *)
+        (* wait until the last possible minute to check if it's already executed *)
           Printf.printf "target:%s\tmd5_old:%s\tmd5_new:%s\tcmd:%s\tpid:%d\n" fname (get_md5 m) (get_md5 (make_md5 f)) cmd pid ; 
-          ignore (Sys.command cmd) ; log_done f c in
+          ignore (Sys.command cmd) (* ; log_done f c *) in
     match n with
     | Empty -> () (* something went horribly awry? *)
     | Node(f, m, c, []) -> if make_md5 f <> m then run_cmd n else ()
@@ -156,8 +159,8 @@ let exec_parallel_commands (Program(prod_list)) (target : filename) =
       flush stdout ;
       match Unix.fork() with
       | 0 -> (List.flatten (List.map (fun (a,_) -> exec_commands a n) dep_hash_alist)) @ [nn] (* waiting for dependencies to return *)
-      | pid -> ignore (Unix.waitpid [] pid) ; ignore (exec nn (Unix.getpid ())) ; log_done f c; []
-  in assert (is_valid_target target) ; exec_commands target (make_node_list prod_list) ;; 
+      | pid -> ignore (Unix.waitpid [] pid) ; ignore (exec nn (Unix.getpid ())) ; log_done f c; [] in
+  assert (is_valid_target target) ; exec_commands target (make_node_list prod_list) ;;
 
 let record_dependencies (Program(prod_list)) = 
   let rec helper = function
@@ -186,7 +189,6 @@ type token = FileTok of string | CmdTok of string ;;
 let remodelfile_lexer l = Genlex.make_lexer ["<-" ; ":" ; ","] (Stream.of_string l) ;; *)
 (* naive approach for now *)
 
-(*
 let parse_remodelfile () =
   let buf = Buffer.create 80 
   and prod_list = ref([])
@@ -245,7 +247,7 @@ let parse_remodelfile () =
   with
   | End_of_file -> if Buffer.contents buf = "" then () else raise (ParseException "Incomplete production."));
   close_in f ; Program(!prod_list);;
-*)
+
 (* let program = parse_remodelfile () ;;  *)
 
 (* program entry *)
@@ -254,7 +256,8 @@ let args = Sys.argv in
     | 1 -> Filename("DEFAULT") 
     | 2 -> Filename(args.(1))
     | _ ->  raise (TargetException "Multiple initial target values are not currently supported") in 
-  ignore(exec_parallel_commands example1 target) ; 
-  record_dependencies example1 ;;
+  asdf ();
+  ignore(exec_parallel_commands example1 target) ;
+ record_dependencies example1 ;; 
 
  
