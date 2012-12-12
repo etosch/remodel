@@ -47,6 +47,11 @@ exception DataIntegrityException of string;;
 exception ParseException of string;;
 exception SynchError of string;;
 
+let rec repeat_string s r = if r = 0 then s else s^(repeat_string s (r - 1));;
+
+let substring_to_end s i =
+  String.sub s i (String.length s - i)
+
 let is_whitespace = function
   | ' ' | '\012' | '\n' | '\r' | '\t' -> true
   | _ -> false ;;
@@ -66,6 +71,12 @@ let rec trim s =
   | (false, true) -> trim (trim_one s Back)
   | (false, false) -> s ;;
 
+let rec trim_front s =
+  if s = "" then s else
+  match is_whitespace s.[0] with
+  | true -> trim_front (substring_to_end s 1)
+  | false -> s;;
+
 let rec string_split target delim = 
   let get_chunk str = 
     try
@@ -81,6 +92,10 @@ let string_partition_at_index target i =
   if String.length target > i 
   then (String.sub target 0 i, String.sub target i (String.length target - i))
   else (target, "")
+
+
+
+
 
 let make_md5 (Filename(f)) = 
   if f = "DEFAULT" then MDNone
@@ -150,7 +165,7 @@ let exec_parallel_commands (Program(prod_list)) (target : filename) =
   let log_done (f : filename) (c : command) = 
     let Command(cmd) = c in 
     if already_executed f c
-    then raise (SynchError ("Already executed "^cmd)) (* this isn't atomic, so who knows if it works? *)
+    then raise (SynchError ("Command "^cmd^" already executed"))
     else try
       let Filename(fname) = f in 
       let o = open_out_gen [Open_append;Open_creat] 0o755 (".remodel/logdone/"^fname^"_"^(string_of_int (Unix.getpid () ) )) in
@@ -166,7 +181,7 @@ let exec_parallel_commands (Program(prod_list)) (target : filename) =
           (* if already_executed f then () else *)
           (* wait until the last possible minute to check if it's already executed *)
             Printf.printf "target:%s\tmd5_old:%s\tmd5_new:%s\tcmd:%s\tpid:%d\n" fname (get_md5 m) (get_md5 (make_md5 f)) cmd pid ; 
-            ignore (Sys.command cmd) ; log_done f c 
+            match (already_executed f c) with true -> () | false -> ignore (Sys.command cmd) ; log_done f c 
         with Sys_error(msg) -> raise (DataIntegrityException ("Some problem in exec: "^msg)) in
     match n with
     | Empty -> () (* something went horribly awry? *)
@@ -212,65 +227,103 @@ let remodelfile_lexer l = Genlex.make_lexer ["<-" ; ":" ; ","] (Stream.of_string
 (* naive approach for now *)
 
 let parse_remodelfile () =
-  let buf = Buffer.create 80 
+  let buf = Buffer.create 160 
   and prod_list = ref([])
+  and has_command = ref(true)
   and f = open_in "REMODELFILE" in
   (try
+    let add_line buf line = Buffer.add_string buf (" "^line) in
     let rec read_for_arrow i =
       while not (String.contains_from (Buffer.contents buf) i '-')
-      do Buffer.add_string buf (input_line f) done;
+      do add_line buf (input_line f) done;
       if (String.contains_from (Buffer.contents buf) i '<') && (String.index_from (Buffer.contents buf) i '-') - (String.index_from (Buffer.contents buf) i '<') = 1
       then (String.index_from (Buffer.contents buf) i '<')
       else read_for_arrow (i) in
     let read_for_colon () =
       (* even if there's a colon in the path, we MUST use the colon before the command, so it's safe to read for the first one *)
       while not (String.contains (Buffer.contents buf) ':')
-      do Buffer.add_string buf (input_line f) done;
+      do add_line buf (input_line f) done;
       String.index (Buffer.contents buf) ':' in
+    let read_for_quotes () =
+      (* read enough characters into the buffer so we cover the first command. returns index of the first quote mark *)
+      while not (String.contains (Buffer.contents buf) '"')
+      do add_line buf (input_line f) done;
+      let start_index = String.index (Buffer.contents buf) '"' in
+      while not (String.contains_from (Buffer.contents buf) (start_index + 1) '"')
+      do add_line buf (input_line f) done;
+      start_index in
     let get_next_target buf =
+      Printf.printf "%s\n"  "get_next_target" ;
       (* get the substring of things before the <-. then split on commas. then check each substr for spaces. return the target of filenames and update the buffer *)
       let (target_string, new_buffer_contents) = string_partition_at_index (Buffer.contents buf) (read_for_arrow 0) in
       let targets = List.map trim (string_split target_string ',') in
       (* ignore (Printf.printf "%d\n" (Unix.getpid())) ; *)
       assert (List.for_all (fun s -> not (contains_whitespace s)) targets) ; 
-      Buffer.clear buf ; Buffer.add_string buf new_buffer_contents ;
+      Buffer.clear buf ; add_line buf new_buffer_contents ;
+      Printf.printf "new_buffer_contents : %s\n" new_buffer_contents ;
       Target (List.map (fun f -> Filename(f)) targets) 
     and get_next_deps buf =
+      Printf.printf "%s\n" "get_next_deps" ;
       (* Since I've just called next target, the first - will be from a <-. Read until a command. per the grammar, there must be deps between <- and : or another <- *)
-      let start_index = String.index (Buffer.contents buf) '-' in (*
-      and colon_index = read_for_colon () in
-      let next_dep_index = try read_for_arrow start_index with End_of_file -> colon_index + 1 in
-      Printf.printf "%d\n%d\n%d" start_index colon_index next_dep_index;
+      let start_index = String.index (Buffer.contents buf) '-' 
+      and colon_index = read_for_colon () in 
+      let next_dep_index = try read_for_arrow (start_index + 1) with End_of_file -> colon_index + 1 in 
+      Printf.printf "%d\t%d\t%d\t%s\n" start_index colon_index next_dep_index (Buffer.contents buf); 
       if colon_index < next_dep_index
       then 
         let (temp_dep_string, new_buffer_contents) = string_partition_at_index (Buffer.contents buf) colon_index in
         let deps = List.map trim (string_split temp_dep_string ',') in
-        ignore (List.map (fun t -> Printf.printf "%sx\n" t) deps) ;
         assert (List.for_all (fun s -> not (contains_whitespace s)) deps) ;
-        Buffer.clear buf ; Buffer.add_string buf new_buffer_contents ;
+        Buffer.clear buf ; add_line buf new_buffer_contents ;
+        Printf.printf "new_buffer_contents : %s\n" new_buffer_contents ;
         Dependency (List.map (fun f -> Filename(f)) deps)
       else
-        let (temp_dep_string, _) = string_partition_at_index (Buffer.contents buf) next_dep_index in
-        let rec take_until lst p = match lst with | [] -> [] | h::t when p h -> [List.hd (string_split h ' ')] | h::t -> h::(take_until t p) in
-        let deps = take_until (List.map trim (string_split temp_dep_string ',')) contains_whitespace in
-        let new_buffer_contents = String.sub (Buffer.contents buf) 0 (List.fold_left (+) 0 (List.map String.length deps)) in
-        ignore (List.map (fun t -> Printf.printf "%sx\n" t) deps) ;
-        assert (List.for_all (fun s -> not (contains_whitespace s)) deps) ;
-        Buffer.clear buf ; Buffer.add_string buf new_buffer_contents ;
-        Dependency (List.map (fun f -> Filename(f)) deps)
-*)      Dependency([]) 
-    and get_next_cmd buf = Command("") in
-(*    while true do *)
+        let (temp_dep_string, _) = string_partition_at_index (String.sub (Buffer.contents buf) 
+                                                                          (start_index + 1) 
+                                                                          (String.length (Buffer.contents buf) - start_index - 1))
+                                   next_dep_index in
+        let rec take_until lst p = match lst with 
+        | [] -> [] 
+        | h::t when p h -> 
+          let hh = trim_front h in
+          let retval = String.sub hh 0 (String.index hh ' ') in
+          [ (repeat_string " " ((String.length h) - (String.length hh)))^retval ]
+        | h::t -> h::(take_until t p) in
+        Printf.printf "%s\n" temp_dep_string ;
+        let deps = take_until (string_split temp_dep_string ',') (fun s -> contains_whitespace (trim s)) in
+        let i = (List.fold_left (+) start_index (List.map String.length deps)) in
+        let j = (String.length (Buffer.contents buf)) in 
+        let new_buffer_contents = (String.sub (Buffer.contents buf) i (j-i)) in
+        Printf.printf "new_buffer_contents : %s\n" new_buffer_contents ;
+        ignore (List.map (fun t -> Printf.printf "x%sx\n" t) deps) ; 
+(*        Buffer.clear buf ; Printf.printf "POSTCLEARNING: %s\n" (Buffer.contents buf) ;  *)
+        Buffer.add_string buf "" ; has_command := false ; 
+        Dependency (List.map (fun f -> Filename(trim(f))) deps)  
+    and get_next_cmd buf = 
+      Printf.printf "%s\n" "get_next_cmd" ;
+      match !has_command with
+      | true -> 
+        read_for_quotes () ;
+        let start_index = String.index (Buffer.contents buf) '"' in
+        let end_index = String.index_from (Buffer.contents buf) start_index '"' in
+        let cmd = String.sub (Buffer.contents buf) start_index (start_index - end_index) in
+        let new_buffer_contents = String.sub (Buffer.contents buf) (end_index + 1) (String.length (Buffer.contents buf)) in
+        Buffer.clear buf ; add_line buf new_buffer_contents ; 
+        Printf.printf "new_buffer_contents : %s\n" new_buffer_contents ;
+        Command(cmd)
+      | false -> has_command := true ; Command("") in
+    while true do
+      Printf.printf "BUFFER:\t%s\n" (Buffer.contents buf) ;
       let target = get_next_target buf in
       let deps = get_next_deps buf in
       let cmd = get_next_cmd buf in
       prod_list := Production(target, deps, cmd)::(!prod_list)
-(*    done;  *)
+    done;  
   with
   | End_of_file -> if Buffer.contents buf = "" then () else raise (ParseException "Incomplete production."));
   close_in f ; Program(!prod_list);;
 
-(* let program = parse_remodelfile () ;;  *)
+let program = parse_remodelfile () ;;  
 
 (* program entry *)
 let args = Sys.argv in 
