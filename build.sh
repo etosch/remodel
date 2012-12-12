@@ -32,6 +32,8 @@ if [[ $a -gt 1 || !( -e bar.o )  || !( -e foo.o ) || !( -e baz ) ]]
 else echo $output"PASS"
 fi
 
+sleep 3
+
 bar2=`md5 -q bar.o`
 foo2=`md5 -q foo.o`
 baz=`md5 -q baz`
@@ -45,6 +47,8 @@ if [[ $a == 0 && $bar1 == `md5 -q bar.cpp` && $bar2 == `md5 -q bar.o` && $foo2 =
 else echo $output"FAIL"
 fi
 
+sleep 3
+
 output="Test case 2.1 : run remodel on DEFAULT (PASS means build failed)..."
 remodel 2> test2.1
 a=`wc -l test2.1 | awk '{print $1}'`
@@ -52,6 +56,8 @@ if [[ $a -gt 0 ]]
 	then echo $output"PASS"
 else echo $output"FAIL"
 fi
+
+sleep 3
 
 output="Test case 3 : rewrite foo.cpp and run remodel on DEFAULT..."
 printf "#include <iostream>\nvoid foo() { std::cout << \"Yo, foo!\"; }" > foo.cpp
@@ -61,6 +67,8 @@ if [[ $a == 0 && `md5 -q bar.cpp` == $bar1 && `md5 -q bar.o` == $bar2 && `md5 -q
 	then echo $output"PASS"
 else echo $output"FAIL"
 fi
+
+sleep 3
 
 foo1=`md5 -q foo.cpp`
 foo2=`md5 -q foo.o`

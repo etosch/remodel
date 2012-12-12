@@ -12,15 +12,20 @@ try
   then let o = open_out _HISTORY in output_string o "" ; close_out o  else () ;
   if not (Sys.file_exists _LOGDONE)
   then Unix.mkdir _LOGDONE 0o755
-  else let logdir = Unix.opendir _LOGDONE in
+  else ignore (Sys.command ("rm -rf "^_LOGDONE)) ; Unix.mkdir _LOGDONE 0o755
+(*  else let logdir = Unix.opendir _LOGDONE in
     while true do 
-      match Unix.readdir logdir with
+      let ff = Unix.readdir logdir in
+      Printf.printf "FILE:\t%s\n" (Sys.getcwd()^"/"^_LOGDONE^ff) ;
+      match ff with
       | "." | ".." -> raise End_of_file
-      | f -> Sys.remove f 
+      | f ->  Sys.remove (Sys.getcwd()^"/"^_LOGDONE^f)
     done;
+    Unix.closedir logdir
+  *)
 with End_of_file -> () 
-| Unix.Unix_error(num,_,_) -> Printf.printf "%s" (Unix.error_message(num))
-| Sys_error(msg) -> Printf.printf "Error eminating from Unix crap at the beginning of the file: %s\n" msg;;
+| Unix.Unix_error(num,_,_) -> Printf.printf "%s" (Unix.error_message(num)) ;
+| Sys_error(msg) -> Printf.printf "Error eminating from Unix crap at the beginning of the file: %s\n" msg ;;
 
 type command = Command of string;;
 type filename = Filename of string;;
@@ -108,7 +113,6 @@ let old_dependencies =
 let exec_parallel_commands (Program(prod_list)) (target : filename) =
   let targets = List.flatten (List.map (fun (Production(Target(file_list),_,_)) -> file_list) prod_list) in
   let rec get_old_hashes (f : filename) (hashes : (filename * md5 list) list) = 
-    Printf.printf "%s" "get_old_hashes" ;
     match hashes with
     | [] -> [MDNone]
     | (ff, md5s)::t when ff = f -> md5s
@@ -123,7 +127,6 @@ let exec_parallel_commands (Program(prod_list)) (target : filename) =
                                       else (List.hd old_hashes, List.tl old_hashes) in
         Node(h, this_hash, cmd, List.map2 (fun a b -> (a, b)) dep_list dep_hashes)::make_node_list(Production(Target(t1), Dependency(dep_list), cmd)::t2) in
   let is_valid_target (f : filename) = 
-    Printf.printf "%s\n" "is_valid_target" ;
     match List.filter (fun ff -> ff = f) targets with 
     | [] -> false
     | h::[] -> true
@@ -134,7 +137,6 @@ let exec_parallel_commands (Program(prod_list)) (target : filename) =
     | (Node(ff,_,_,_) as h)::t when ff = f -> h
     | _::t -> get_from_node_list f t in
   let already_executed (Filename(fname)) (Command(cmd)) =
-    Printf.printf "%s\n" "already_executed" ;
     let recorded = Sys.readdir _LOGDONE in
     match List.filter (fun s -> fname = List.hd (string_split s '_' )) (Array.to_list recorded) with
     | [] -> false
@@ -146,7 +148,6 @@ let exec_parallel_commands (Program(prod_list)) (target : filename) =
                                     | End_of_file -> false)
               cmds in
   let log_done (f : filename) (c : command) = 
-    Printf.printf "%s\n" "log_done" ;
     let Command(cmd) = c in 
     if already_executed f c
     then raise (SynchError ("Already executed "^cmd)) (* this isn't atomic, so who knows if it works? *)
@@ -156,7 +157,6 @@ let exec_parallel_commands (Program(prod_list)) (target : filename) =
       output_string o cmd ; close_out o 
     with Sys_error(msg) -> raise (DataIntegrityException "Some problem in log_done") in
   let exec (n : node) pid = 
-    Printf.printf "%s\n" "exec" ;
     let run_cmd (nn : node) =
       match nn with
       | Empty -> raise (NodeException "Empty node passed to run_cmd; this is VERY BAD")
@@ -167,14 +167,13 @@ let exec_parallel_commands (Program(prod_list)) (target : filename) =
           (* wait until the last possible minute to check if it's already executed *)
             Printf.printf "target:%s\tmd5_old:%s\tmd5_new:%s\tcmd:%s\tpid:%d\n" fname (get_md5 m) (get_md5 (make_md5 f)) cmd pid ; 
             ignore (Sys.command cmd) ; log_done f c 
-        with Sys_error(msg) -> raise (DataIntegrityException "Some problem in exec") in
+        with Sys_error(msg) -> raise (DataIntegrityException ("Some problem in exec: "^msg)) in
     match n with
     | Empty -> () (* something went horribly awry? *)
     | Node(f, m, c, []) -> if make_md5 f <> m then run_cmd n else ()
     | Node(f,m,c,dep_hash_alist) -> 
       if (List.for_all (fun (fname, hash) -> make_md5 fname = hash) ((f, m)::dep_hash_alist)) then () else run_cmd n in
   let rec exec_commands (f : filename) (n : node list) =
-    Printf.printf "%s\n" "exec_commands" ;
     match get_from_node_list f n with
     | Empty -> []
     | Node(_,_,_,[]) as nn -> ignore (exec nn (Unix.getpid ())) ; [nn] 
