@@ -1,21 +1,20 @@
 #!/bin/sh
 set -e
 rm -rf tests
-
+echo "Making tests directory"
 mkdir tests
-
+echo "Creating new test files in tests directory"
 cd tests
-printf "DEFAULT <- baz
-baz <- foo.o, bar.o: \"g++ foo.o bar.o -o baz\"
+printf "DEFAULT <- baz baz <- foo.o, bar.o: \"g++ foo.o bar.o -o baz\"
 foo.o <- foo.cpp : \"g++ -c foo.cpp -o foo.o\"bar.o <- bar.cpp: \"g++ -c bar.cpp -o bar.o\"
 existence <- existence.ml, a.txt : \"ocamlc -o existence existence.ml ; ./existence\"
 a.txt, b.txt<- do.sh:\"chmod +x do.sh ; ./do.sh\"
-do.sh<-:\"echo \\\"touch a.txt; touch b.txt\\\" > do.sh\"" > REMODELFILE
+do.sh<-REMODELFILE:\"echo \\\"touch a.txt; touch b.txt\\\" > do.sh\"" > REMODELFILE
 printf "#include <iostream>\nvoid foo() { std::cout << \"Hello, foo!\"; }" > foo.cpp
 printf "#include <iostream>\nextern int foo (); void bar() { std::cout << \"Hello, bar!\"; } int main() { foo(); bar(); return 0; }" > bar.cpp
 printf "output_string stdout (string_of_bool (Sys.file_exists \"a.txt\"))" > existence.ml
 cd ..
-
+echo "Compiling the program"
 ocamlopt unix.cmxa -o remodel src/remodel.ml 
 PATH=$PATH:`pwd`
 cd tests

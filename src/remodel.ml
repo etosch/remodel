@@ -2,17 +2,25 @@
 (* 1. When handling multiple dependencies/targets, always sort - i.e. don't just use them in the same order as the REMODELFILE? *)
 (* 2. Check that the hashes of the dependencies match the hashes of their targets -> i.e. make sure that the build didn't get screwed up *)
 (* 3. Allow multiple initial targets and execute in parallel *)
-if not (Sys.file_exists ".remodel")
-then Unix.mkdir ".remodel" 0o755
-else ();;
-if not (Sys.file_exists ".remodel/history") 
-then let o = open_out ".remodel/history" in output_string o "" ; close_out o else () ;;
+let _LOGDONE = ".remodel/logdone/" and _HISTORY = ".remodel/history";;
 
-let asdf () =
-  let o = open_out ".remodel/logdone" in 
-    output_string o "" ; close_out o ;;
- 
- 
+try 
+  if not (Sys.file_exists ".remodel")
+  then Unix.mkdir ".remodel" 0o755
+  else () ;
+  if not (Sys.file_exists _HISTORY) 
+  then let o = open_out _HISTORY in output_string o "" ; close_out o  else () ;
+  if not (Sys.file_exists _LOGDONE)
+  then Unix.mkdir _LOGDONE 0o755
+  else let logdir = Unix.opendir _LOGDONE in
+    while true do 
+      match Unix.readdir logdir with
+      | "." | ".." -> raise End_of_file
+      | f -> Sys.remove f 
+    done;
+with End_of_file -> () 
+| Unix.Unix_error(num,_,_) -> Printf.printf "%s" (Unix.error_message(num))
+| Sys_error(msg) -> Printf.printf "Error eminating from Unix crap at the beginning of the file: %s\n" msg;;
 
 type command = Command of string;;
 type filename = Filename of string;;
@@ -100,6 +108,7 @@ let old_dependencies =
 let exec_parallel_commands (Program(prod_list)) (target : filename) =
   let targets = List.flatten (List.map (fun (Production(Target(file_list),_,_)) -> file_list) prod_list) in
   let rec get_old_hashes (f : filename) (hashes : (filename * md5 list) list) = 
+    Printf.printf "%s" "get_old_hashes" ;
     match hashes with
     | [] -> [MDNone]
     | (ff, md5s)::t when ff = f -> md5s
@@ -114,6 +123,7 @@ let exec_parallel_commands (Program(prod_list)) (target : filename) =
                                       else (List.hd old_hashes, List.tl old_hashes) in
         Node(h, this_hash, cmd, List.map2 (fun a b -> (a, b)) dep_list dep_hashes)::make_node_list(Production(Target(t1), Dependency(dep_list), cmd)::t2) in
   let is_valid_target (f : filename) = 
+    Printf.printf "%s\n" "is_valid_target" ;
     match List.filter (fun ff -> ff = f) targets with 
     | [] -> false
     | h::[] -> true
@@ -123,35 +133,48 @@ let exec_parallel_commands (Program(prod_list)) (target : filename) =
     | [] -> Empty
     | (Node(ff,_,_,_) as h)::t when ff = f -> h
     | _::t -> get_from_node_list f t in
-  let already_executed (Filename(fname)) =
-    let b = ref(false)
-    and l = open_in ".remodel/logdone" in
-    while (not !b) do
-      try b := input_line l = fname; with End_of_file -> ();
-    done; close_in l ; !b in
-  let log_done (f : filename) (Command(cmd)) = 
-    if already_executed f 
+  let already_executed (Filename(fname)) (Command(cmd)) =
+    Printf.printf "%s\n" "already_executed" ;
+    let recorded = Sys.readdir _LOGDONE in
+    match List.filter (fun s -> fname = List.hd (string_split s '_' )) (Array.to_list recorded) with
+    | [] -> false
+    | cmds -> List.exists (fun f -> try
+                                      let ff = open_in (_LOGDONE^f) in
+                                      let retval = (input_line ff = cmd) 
+                                      in close_in ff; retval
+                                    with Sys_error(msg) -> raise (DataIntegrityException ("already_executed\t"^msg))
+                                    | End_of_file -> false)
+              cmds in
+  let log_done (f : filename) (c : command) = 
+    Printf.printf "%s\n" "log_done" ;
+    let Command(cmd) = c in 
+    if already_executed f c
     then raise (SynchError ("Already executed "^cmd)) (* this isn't atomic, so who knows if it works? *)
-    else 
-      let o = open_out_gen [Open_append] 0o755 ".remodel/logdone" 
-      and Filename(fname) = f in 
-      output_string o (fname^"\n") ; close_out o in
+    else try
+      let Filename(fname) = f in 
+      let o = open_out_gen [Open_append;Open_creat] 0o755 (".remodel/logdone/"^fname^"_"^(string_of_int (Unix.getpid () ) )) in
+      output_string o cmd ; close_out o 
+    with Sys_error(msg) -> raise (DataIntegrityException "Some problem in log_done") in
   let exec (n : node) pid = 
+    Printf.printf "%s\n" "exec" ;
     let run_cmd (nn : node) =
       match nn with
       | Empty -> raise (NodeException "Empty node passed to run_cmd; this is VERY BAD")
       | Node(f,m,c,_) ->
-        let Filename(fname) = f and Command(cmd) = c in
-        (* if already_executed f then () else *)
-        (* wait until the last possible minute to check if it's already executed *)
-          Printf.printf "target:%s\tmd5_old:%s\tmd5_new:%s\tcmd:%s\tpid:%d\n" fname (get_md5 m) (get_md5 (make_md5 f)) cmd pid ; 
-          ignore (Sys.command cmd) (* ; log_done f c *) in
+        try
+          let Filename(fname) = f and Command(cmd) = c in
+          (* if already_executed f then () else *)
+          (* wait until the last possible minute to check if it's already executed *)
+            Printf.printf "target:%s\tmd5_old:%s\tmd5_new:%s\tcmd:%s\tpid:%d\n" fname (get_md5 m) (get_md5 (make_md5 f)) cmd pid ; 
+            ignore (Sys.command cmd) ; log_done f c 
+        with Sys_error(msg) -> raise (DataIntegrityException "Some problem in exec") in
     match n with
     | Empty -> () (* something went horribly awry? *)
     | Node(f, m, c, []) -> if make_md5 f <> m then run_cmd n else ()
     | Node(f,m,c,dep_hash_alist) -> 
       if (List.for_all (fun (fname, hash) -> make_md5 fname = hash) ((f, m)::dep_hash_alist)) then () else run_cmd n in
   let rec exec_commands (f : filename) (n : node list) =
+    Printf.printf "%s\n" "exec_commands" ;
     match get_from_node_list f n with
     | Empty -> []
     | Node(_,_,_,[]) as nn -> ignore (exec nn (Unix.getpid ())) ; [nn] 
@@ -159,7 +182,7 @@ let exec_parallel_commands (Program(prod_list)) (target : filename) =
       flush stdout ;
       match Unix.fork() with
       | 0 -> (List.flatten (List.map (fun (a,_) -> exec_commands a n) dep_hash_alist)) @ [nn] (* waiting for dependencies to return *)
-      | pid -> ignore (Unix.waitpid [] pid) ; ignore (exec nn (Unix.getpid ())) ; log_done f c; [] in
+      | pid -> ignore (Unix.waitpid [] pid) ; ignore (exec nn (Unix.getpid ())) ; []  in
   assert (is_valid_target target) ; exec_commands target (make_node_list prod_list) ;;
 
 let record_dependencies (Program(prod_list)) = 
@@ -256,7 +279,7 @@ let args = Sys.argv in
     | 1 -> Filename("DEFAULT") 
     | 2 -> Filename(args.(1))
     | _ ->  raise (TargetException "Multiple initial target values are not currently supported") in 
-  asdf ();
+(*  asdf (); *)
   ignore(exec_parallel_commands example1 target) ;
  record_dependencies example1 ;; 
 
