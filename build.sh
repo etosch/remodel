@@ -15,7 +15,8 @@ printf "#include <iostream>\nextern int foo (); void bar() { std::cout << \"Hell
 printf "output_string stdout (string_of_bool (Sys.file_exists \"a.txt\"))" > existence.ml
 cd ..
 echo "Compiling the program"
-ocamlopt unix.cmxa -o remodel src/remodel.ml 
+ocamlbuild -libs unix src/remodel.native
+mv remodel.native remodel
 PATH=$PATH:`pwd`
 cd tests
 remodel
