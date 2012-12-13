@@ -12,8 +12,6 @@ type md5 = MDNone | MD5 of string;;
 type node = Empty | Node of filename * md5 * command * (filename * md5) list;;
 type graph = Uninstantiated | Graph of md5 * node list;;
 
-type direction = Front | Back ;;
-
 exception TargetException of string;;
 exception NodeException of string;;
 exception CommandException of string;;
