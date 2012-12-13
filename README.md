@@ -26,3 +26,5 @@ MD5 hashes for files are stored in the same order that they are entered in the R
 There is the potential for race conditions between multiple processes operating on the same file and recording their status to the `.remodel/logdone` directory. However, since each command is in a file named by the target's name and the pid of the processes executing the command within, such scenarios can be detected post-build.
 
 The REMODEL file cannot handle nested double quotations in commands.
+
+The graph type is not currently used. I had wanted to do something like check the md5 of the remodel file. Not sure this is worth doing.
