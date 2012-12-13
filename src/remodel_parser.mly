@@ -6,11 +6,14 @@
 %token <string> Lfilename 
 %token <string> Lcommand
 %left Ldeparrow
-%start program
-%type <Remodel_types.production list> program
+%start toplevel
+%type <Remodel_types.program> toplevel
  %%
 
-program :
+toplevel : 
+  | program Leof								{ Program($1) }
+
+program : 
   | production 									{ [$1] }
   | production program							{ $1::$2 }
 
@@ -25,5 +28,6 @@ target :
 dependency :
   | Lfilename									{ [Filename($1)] }
   | Lfilename Lcomma dependency 				{ Filename($1)::$3 }
+
 
 %%

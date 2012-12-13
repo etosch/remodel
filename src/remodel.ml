@@ -23,6 +23,14 @@ exception SynchError of string;;
 
 let old_dependencies = ref([Filename(""), []])
 
+(* let program_pretty_print (p) = 
+  let Program(prod_list) = p in
+  "Program("^(dependencies_pretty_print)^")";;
+
+let dependencies_pretty_print = function
+  | [] -> ""
+  | Dependency(::t -> 
+*)
 let rec repeat_string s r = if r = 0 then s else s^(repeat_string s (r - 1));;
 
 let substring_to_end s i =
@@ -217,18 +225,33 @@ let prep_disk () =
   | Unix.Unix_error(num,_,_) -> Printf.printf "Error in creating %s : %s\n" _LOGDONE (Unix.error_message(num)) ; exit (-1)
   | Sys_error(msg) -> Printf.printf "Error eminating from creating %s : %s\n" _LOGDONE msg ; exit (-1));;
 
+exception Error of exn * (int * int * string * string);;
+
+let parse_remodelfile () = 
+  let f = open_in _REMODELFILE in
+  let lexbuf = Lexing.from_channel f in
+  try
+    let p = Remodel_parser.toplevel Remodel_lexer.lexer lexbuf in
+    close_in f ; p
+      (* from http://stackoverflow.com/questions/1933101/ocamlyacc-parse-error-what-token *)
+  with exn ->
+    begin
+      let curr = lexbuf.Lexing.lex_curr_p in
+      let line = curr.Lexing.pos_lnum in
+      let cnum = curr.Lexing.pos_cnum - curr.Lexing.pos_bol in
+      let tok = Lexing.lexeme lexbuf in
+(*      let tail = Remodel_lexer.ruleTail "" lexbuf in *)
+      raise (ParseException tok)
+    end;;
+
 (* program entry *)
 let args = Sys.argv in 
-  prep_disk();
+  prep_disk(); 
   old_dependencies := get_old_dependencies() ;
-  let program = 
-    let f = open_in _REMODELFILE in
-    let p = Program(Remodel_parser.program Remodel_lexer.lexer (Lexing.from_channel f)) in
-    close_in f ; p 
+  let program = parse_remodelfile ()
   and target = match Array.length args with
     | 1 -> Filename("DEFAULT") 
     | 2 -> Filename(args.(1))
     | _ ->  raise (TargetException "Multiple initial target values are not currently supported") in 
   ignore(exec_parallel_commands program target) ;
-  record_dependencies program 
-  ;; 
+  record_dependencies program ;; 
