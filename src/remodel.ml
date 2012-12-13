@@ -217,7 +217,7 @@ let prep_disk () =
         do 
           match Unix.readdir logdir with
           | "." | ".." -> ()
-          | f -> Unix.unlink f
+          | f -> Unix.unlink (_LOGDONE^f)
         done;
       with End_of_file -> ();
       Unix.closedir logdir;
