@@ -1,9 +1,13 @@
 #!/bin/sh
 set -e
 rm -rf tests
+echo "-------------------------------------------"
 echo "Making tests directory"
+echo "-------------------------------------------"
 mkdir tests
 echo "Creating new test files in tests directory"
+echo "-------------------------------------------"
+echo "-------------------------------------------"
 cd tests
 printf "DEFAULT <- baz baz <- foo.o, bar.o: \"g++ foo.o bar.o -o baz\"
 foo.o <- foo.cpp : \"g++ -c foo.cpp -o foo.o\"bar.o <- bar.cpp: \"g++ -c bar.cpp -o bar.o\"
@@ -14,23 +18,25 @@ printf "#include <iostream>\nvoid foo() { std::cout << \"Hello, foo!\"; }" > foo
 printf "#include <iostream>\nextern int foo (); void bar() { std::cout << \"Hello, bar!\"; } int main() { foo(); bar(); return 0; }" > bar.cpp
 printf "output_string stdout (string_of_bool (Sys.file_exists \"a.txt\"))" > existence.ml
 cd ..
+echo "-------------------------------------------"
 echo "Compiling the program"
-ocamlbuild -libs unix src/remodel.native
+ocamlbuild -libs unix src/remodel.native 1> ocamlbuild_log
 mv remodel.native remodel
 PATH=$PATH:`pwd`
 cd tests
+echo "-------------------------------------------"
+printf "Test case 1 : run DEFAULT for the first time..."
 remodel
 # grab md5s of bar.o and bar.cpp - these should not change after running
 # check whether this machine has md5 on it
 bar1=`md5 -q bar.cpp`
 foo1=`md5 -q foo.cpp`
 
-output="Test case 1 : run DEFAULT for the first time..."
 remodel 2> test1
 a=`wc -l test1 | awk '{print $1}'`
 if [[ $a -gt 1 || !( -e bar.o )  || !( -e foo.o ) || !( -e baz ) ]]
-	then echo $output"FAIL"
-else echo $output"PASS"
+	then echo "FAIL"
+else echo "PASS"
 fi
 
 sleep 3
