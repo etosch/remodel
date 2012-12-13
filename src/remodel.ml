@@ -23,44 +23,6 @@ exception SynchError of string;;
 
 let old_dependencies = ref([Filename(""), []])
 
-(* let program_pretty_print (p) = 
-  let Program(prod_list) = p in
-  "Program("^(dependencies_pretty_print)^")";;
-
-let dependencies_pretty_print = function
-  | [] -> ""
-  | Dependency(::t -> 
-*)
-let rec repeat_string s r = if r = 0 then s else s^(repeat_string s (r - 1));;
-
-let substring_to_end s i =
-  String.sub s i (String.length s - i)
-
-let is_whitespace = function
-  | ' ' | '\012' | '\n' | '\r' | '\t' -> true
-  | _ -> false ;;
-
-let contains_whitespace s = 
-  let f = String.contains s in
-    f ' ' || f 'n' || f '\r' || f '\t' ;;
-
-let rec trim s = 
-  if s = "" then s else
-  let trim_one s d = match d with
-    | Front -> String.sub s 1 (String.length s - 1) 
-    | Back -> String.sub s 0 (String.length s - 1) in
-  match (is_whitespace s.[0], is_whitespace s.[String.length s - 1]) with
-  | (true, true) -> trim (trim_one (trim_one s Front) Back)
-  | (true, false) -> trim (trim_one s Front)
-  | (false, true) -> trim (trim_one s Back)
-  | (false, false) -> s ;;
-
-let rec trim_front s =
-  if s = "" then s else
-  match is_whitespace s.[0] with
-  | true -> trim_front (substring_to_end s 1)
-  | false -> s;;
-
 let rec string_split target delim = 
   let get_chunk str = 
     try
@@ -71,11 +33,6 @@ let rec string_split target delim =
   | ("", _) -> [] 
   | (chunk, -1) -> [chunk] 
   | (chunk, i) -> chunk :: (string_split (String.sub target i ((String.length target) - i)) delim) ;;
-
-let string_partition_at_index target i =
-  if String.length target > i 
-  then (String.sub target 0 i, String.sub target i (String.length target - i))
-  else (target, "")
 
 let make_md5 (Filename(f)) = 
   if f = "DEFAULT" then MDNone
@@ -141,7 +98,7 @@ let exec_parallel_commands (Program(prod_list)) (target : filename) =
           let Filename(fname) = f and Command(cmd) = c in
           (* if already_executed f then () else *)
           (* wait until the last possible minute to check if it's already executed *)
-            Printf.printf "target:%s\tmd5_old:%s\tmd5_new:%s\tcmd:%s\tpid:%d\n" fname (get_md5 m) (get_md5 (make_md5 f)) cmd pid ; 
+          (* Printf.printf "target:%s\tmd5_old:%s\tmd5_new:%s\tcmd:%s\tpid:%d\n" fname (get_md5 m) (get_md5 (make_md5 f)) cmd pid ; *)
             match (already_executed f c) with true -> () | false -> ignore (Sys.command cmd) ; log_done f c 
         with Sys_error(msg) -> raise (DataIntegrityException ("Some problem in exec: "^msg)) in
     match n with
@@ -192,7 +149,6 @@ let get_old_dependencies () =
   let dep_hash_alist = read_old_deps ()
   in close_in open_file; dep_hash_alist ;;
 
-
 let prep_disk () =
   (try 
     if not (Sys.file_exists ".remodel")
@@ -225,15 +181,13 @@ let prep_disk () =
   | Unix.Unix_error(num,_,_) -> Printf.printf "Error in creating %s : %s\n" _LOGDONE (Unix.error_message(num)) ; exit (-1)
   | Sys_error(msg) -> Printf.printf "Error eminating from creating %s : %s\n" _LOGDONE msg ; exit (-1));;
 
-exception Error of exn * (int * int * string * string);;
-
 let parse_remodelfile () = 
   let f = open_in _REMODELFILE in
   let lexbuf = Lexing.from_channel f in
   try
     let p = Remodel_parser.toplevel Remodel_lexer.lexer lexbuf in
     close_in f ; p
-      (* from http://stackoverflow.com/questions/1933101/ocamlyacc-parse-error-what-token *)
+      (* from http://stackoverflow.com/questions/1933101/ocamlyacc-parse-error-what-token  - exeception above *)
   with exn ->
     begin
       let curr = lexbuf.Lexing.lex_curr_p in
@@ -244,14 +198,18 @@ let parse_remodelfile () =
       raise (ParseException tok)
     end;;
 
+let main program target =
+  ignore(exec_parallel_commands program target) ;
+  record_dependencies program ;;
+
 (* program entry *)
 let args = Sys.argv in 
   prep_disk(); 
   old_dependencies := get_old_dependencies() ;
   let program = parse_remodelfile ()
   and target = match Array.length args with
-    | 1 -> Filename("DEFAULT") 
-    | 2 -> Filename(args.(1))
-    | _ ->  raise (TargetException "Multiple initial target values are not currently supported") in 
-  ignore(exec_parallel_commands program target) ;
-  record_dependencies program ;; 
+    | 1 -> [| Filename("DEFAULT") |]
+    | _ -> Array.map (fun f -> Filename(f)) (Array.sub args 1 (Array.length args - 1)) in
+  Array.map (function t -> main program t) target
+  
+   ;; 

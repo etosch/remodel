@@ -82,7 +82,7 @@ foo2=`md5 -q foo.o`
 baz=`md5 -q baz`
 
 output="Test case 4 : dual targets and a target with a command and no dependencies on existence.ml..."
-remodel existence 2> test4
+remodel existence 2> test4 1> ".crap"
 a=`wc -l test4 | awk '{print $1}'`
 if [[ $a == 0 && -e do.sh && -e a.txt && -e b.txt ]]
 	then echo $output"PASS"
