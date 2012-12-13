@@ -2,37 +2,11 @@
 (* 1. When handling multiple dependencies/targets, always sort - i.e. don't just use them in the same order as the REMODELFILE? *)
 (* 2. Check that the hashes of the dependencies match the hashes of their targets -> i.e. make sure that the build didn't get screwed up *)
 (* 3. Allow multiple initial targets and execute in parallel *)
-let _LOGDONE = ".remodel/logdone/" and _HISTORY = ".remodel/history";;
-
-try 
-  if not (Sys.file_exists ".remodel")
-  then Unix.mkdir ".remodel" 0o755
-  else () ;
-  if not (Sys.file_exists _HISTORY) 
-  then let o = open_out _HISTORY in output_string o "" ; close_out o  else () ;
-  if not (Sys.file_exists _LOGDONE)
-  then Unix.mkdir _LOGDONE 0o755
-  else ignore (Sys.command ("rm -rf "^_LOGDONE)) ; Unix.mkdir _LOGDONE 0o755
-(*  else let logdir = Unix.opendir _LOGDONE in
-    while true do 
-      let ff = Unix.readdir logdir in
-      Printf.printf "FILE:\t%s\n" (Sys.getcwd()^"/"^_LOGDONE^ff) ;
-      match ff with
-      | "." | ".." -> raise End_of_file
-      | f ->  Sys.remove (Sys.getcwd()^"/"^_LOGDONE^f)
-    done;
-    Unix.closedir logdir
-  *)
-with End_of_file -> () 
-| Unix.Unix_error(num,_,_) -> Printf.printf "%s" (Unix.error_message(num)) ;
-| Sys_error(msg) -> Printf.printf "Error eminating from Unix crap at the beginning of the file: %s\n" msg ;;
-
-type command = Command of string;;
-type filename = Filename of string;;
-type target = Target of filename list;;
-type dependency = Dependency of filename list;;
-type production = Production of target * dependency * command;;
-type program = Program of production list;;
+(* 4. Would like to support double quotes *)
+open Remodel_types
+let _LOGDONE = ".remodel/logdone/" 
+and _HISTORY = ".remodel/history"
+and _REMODELFILE = "REMODELFILE" ;;
 
 type md5 = MDNone | MD5 of string;;
 type node = Empty | Node of filename * md5 * command * (filename * md5) list;;
@@ -46,6 +20,8 @@ exception CommandException of string;;
 exception DataIntegrityException of string;;
 exception ParseException of string;;
 exception SynchError of string;;
+
+let old_dependencies = ref([Filename(""), []])
 
 let rec repeat_string s r = if r = 0 then s else s^(repeat_string s (r - 1));;
 
@@ -93,10 +69,6 @@ let string_partition_at_index target i =
   then (String.sub target 0 i, String.sub target i (String.length target - i))
   else (target, "")
 
-
-
-
-
 let make_md5 (Filename(f)) = 
   if f = "DEFAULT" then MDNone
   else if Sys.file_exists f then MD5(Digest.to_hex (Digest.file f))
@@ -105,25 +77,6 @@ let make_md5 (Filename(f)) =
 let get_md5 = function
  | MD5(s) -> s
  | MDNone -> ""
-
-let old_dependencies =
-  let rec split_string s = 
-    try
-      let space_index = String.index s ' ' in
-      let first_half = String.sub s 0 space_index
-      and second_half = String.sub s (space_index + 1) (String.length s - space_index - 1) in
-      first_half::(split_string second_half)
-    with Not_found -> [s] in
-  let open_file = open_in ".remodel/history" in
-  let rec read_old_deps () =
-    try
-      let line = split_string (input_line open_file) in
-      match line with
-      | [] -> []
-      | f::md5s -> (Filename(f), List.map (fun s -> if f = "DEFAULT" then MDNone else MD5(s)) md5s)::(read_old_deps ())
-    with End_of_file -> [] in
-  let dep_hash_alist = read_old_deps ()
-  in close_in open_file; dep_hash_alist ;;
 
 let exec_parallel_commands (Program(prod_list)) (target : filename) =
   let targets = List.flatten (List.map (fun (Production(Target(file_list),_,_)) -> file_list) prod_list) in
@@ -136,7 +89,7 @@ let exec_parallel_commands (Program(prod_list)) (target : filename) =
     | [] -> []  
     | Production(Target([]), _, _)::t -> make_node_list t
     | Production(Target(h::t1), Dependency(dep_list), cmd)::t2 -> 
-        let old_hashes = get_old_hashes h old_dependencies in
+        let old_hashes = get_old_hashes h !old_dependencies in
         let (this_hash, dep_hashes) = if List.length old_hashes <> List.length dep_list + 1
                                       then (MDNone, List.map (fun _ -> MDNone) dep_list)
                                       else (List.hd old_hashes, List.tl old_hashes) in
@@ -209,130 +162,73 @@ let record_dependencies (Program(prod_list)) =
     let prefix = if f = "DEFAULT" then f else f^" "^(get_md5 (make_md5 h)) in
     (List.fold_left concat_hashes prefix make_md5s_for_deps)^"\n"^helper(Production(Target(t1), Dependency(l), cmd)::t2) in
   let deps = helper prod_list 
-  and history = open_out ".remodel/history" in
+  and history = open_out _HISTORY in
   output_string history deps; close_out history;; 
 
-let example1 = Program([Production(Target([Filename("DEFAULT")]), Dependency([Filename("baz")]), Command("")) ;
-              Production(Target([Filename("baz")]), Dependency([Filename("foo.o") ; Filename("bar.o")]), Command("g++ foo.o bar.o -o baz")) ;
-              Production(Target([Filename("foo.o")]), Dependency([Filename("foo.cpp")]), Command("g++ -c foo.cpp -o foo.o")) ;
-              Production(Target([Filename("bar.o")]), Dependency([Filename("bar.cpp")]), Command("g++ -c bar.cpp -o bar.o")) ;
-              Production(Target([Filename("existence")]), Dependency([Filename("existence.ml") ; Filename("a.txt")]), Command("ocamlc -o existence existence.ml ; ./existence")) ;
-              Production(Target([Filename("a.txt") ; Filename("b.txt")]), Dependency([Filename("do.sh")]), Command("chmod +x do.sh ; ./do.sh")) ;
-              Production(Target([Filename("do.sh")]), Dependency([]), Command("echo \"touch a.txt; touch b.txt\" > do.sh"))
-              ]) ;;
+let get_old_dependencies () =
+  let rec split_string s = 
+    try
+      let space_index = String.index s ' ' in
+      let first_half = String.sub s 0 space_index
+      and second_half = String.sub s (space_index + 1) (String.length s - space_index - 1) in
+      first_half::(split_string second_half)
+    with Not_found -> [s] in
+  let open_file = open_in _HISTORY in
+  let rec read_old_deps () =
+    try
+      let line = split_string (input_line open_file) in
+      match line with
+      | [] -> []
+      | f::md5s -> (Filename(f), List.map (fun s -> if f = "DEFAULT" then MDNone else MD5(s)) md5s)::(read_old_deps ())
+    with End_of_file -> [] in
+  let dep_hash_alist = read_old_deps ()
+  in close_in open_file; dep_hash_alist ;;
 
-(* type lexeme = Lint of int | Lident of string;;
-type token = FileTok of string | CmdTok of string ;;
-let remodelfile_lexer l = Genlex.make_lexer ["<-" ; ":" ; ","] (Stream.of_string l) ;; *)
-(* naive approach for now *)
 
-let parse_remodelfile () =
-  let buf = Buffer.create 160 
-  and prod_list = ref([])
-  and has_command = ref(true)
-  and f = open_in "REMODELFILE" in
+let prep_disk () =
+  (try 
+    if not (Sys.file_exists ".remodel")
+    then Unix.mkdir ".remodel" 0o755
+    else () ;
+  with 
+  | Unix.Unix_error(num,_,_) -> Printf.printf "Error in creating .remodel/ : %s\n" (Unix.error_message(num)) ; exit (-1) ;
+  | Sys_error(msg) -> Printf.printf "Error eminating from creating .remodel/ : %s\n" msg ; exit (-1));
   (try
-    let add_line buf line = Buffer.add_string buf (" "^line) in
-    let rec read_for_arrow i =
-      while not (String.contains_from (Buffer.contents buf) i '-')
-      do add_line buf (input_line f) done;
-      if (String.contains_from (Buffer.contents buf) i '<') && (String.index_from (Buffer.contents buf) i '-') - (String.index_from (Buffer.contents buf) i '<') = 1
-      then (String.index_from (Buffer.contents buf) i '<')
-      else read_for_arrow (i) in
-    let read_for_colon () =
-      (* even if there's a colon in the path, we MUST use the colon before the command, so it's safe to read for the first one *)
-      while not (String.contains (Buffer.contents buf) ':')
-      do add_line buf (input_line f) done;
-      String.index (Buffer.contents buf) ':' in
-    let read_for_quotes () =
-      (* read enough characters into the buffer so we cover the first command. returns index of the first quote mark *)
-      while not (String.contains (Buffer.contents buf) '"')
-      do add_line buf (input_line f) done;
-      let start_index = String.index (Buffer.contents buf) '"' in
-      while not (String.contains_from (Buffer.contents buf) (start_index + 1) '"')
-      do add_line buf (input_line f) done;
-      start_index in
-    let get_next_target buf =
-      Printf.printf "%s\n"  "get_next_target" ;
-      (* get the substring of things before the <-. then split on commas. then check each substr for spaces. return the target of filenames and update the buffer *)
-      let (target_string, new_buffer_contents) = string_partition_at_index (Buffer.contents buf) (read_for_arrow 0) in
-      let targets = List.map trim (string_split target_string ',') in
-      (* ignore (Printf.printf "%d\n" (Unix.getpid())) ; *)
-      assert (List.for_all (fun s -> not (contains_whitespace s)) targets) ; 
-      Buffer.clear buf ; add_line buf new_buffer_contents ;
-      Printf.printf "new_buffer_contents : %s\n" new_buffer_contents ;
-      Target (List.map (fun f -> Filename(f)) targets) 
-    and get_next_deps buf =
-      Printf.printf "%s\n" "get_next_deps" ;
-      (* Since I've just called next target, the first - will be from a <-. Read until a command. per the grammar, there must be deps between <- and : or another <- *)
-      let start_index = String.index (Buffer.contents buf) '-' 
-      and colon_index = read_for_colon () in 
-      let next_dep_index = try read_for_arrow (start_index + 1) with End_of_file -> colon_index + 1 in 
-      Printf.printf "%d\t%d\t%d\t%s\n" start_index colon_index next_dep_index (Buffer.contents buf); 
-      if colon_index < next_dep_index
-      then 
-        let (temp_dep_string, new_buffer_contents) = string_partition_at_index (Buffer.contents buf) colon_index in
-        let deps = List.map trim (string_split temp_dep_string ',') in
-        assert (List.for_all (fun s -> not (contains_whitespace s)) deps) ;
-        Buffer.clear buf ; add_line buf new_buffer_contents ;
-        Printf.printf "new_buffer_contents : %s\n" new_buffer_contents ;
-        Dependency (List.map (fun f -> Filename(f)) deps)
-      else
-        let (temp_dep_string, _) = string_partition_at_index (String.sub (Buffer.contents buf) 
-                                                                          (start_index + 1) 
-                                                                          (String.length (Buffer.contents buf) - start_index - 1))
-                                   next_dep_index in
-        let rec take_until lst p = match lst with 
-        | [] -> [] 
-        | h::t when p h -> 
-          let hh = trim_front h in
-          let retval = String.sub hh 0 (String.index hh ' ') in
-          [ (repeat_string " " ((String.length h) - (String.length hh)))^retval ]
-        | h::t -> h::(take_until t p) in
-        Printf.printf "%s\n" temp_dep_string ;
-        let deps = take_until (string_split temp_dep_string ',') (fun s -> contains_whitespace (trim s)) in
-        let i = (List.fold_left (+) start_index (List.map String.length deps)) in
-        let j = (String.length (Buffer.contents buf)) in 
-        let new_buffer_contents = (String.sub (Buffer.contents buf) i (j-i)) in
-        Printf.printf "new_buffer_contents : %s\n" new_buffer_contents ;
-        ignore (List.map (fun t -> Printf.printf "x%sx\n" t) deps) ; 
-(*        Buffer.clear buf ; Printf.printf "POSTCLEARNING: %s\n" (Buffer.contents buf) ;  *)
-        Buffer.add_string buf "" ; has_command := false ; 
-        Dependency (List.map (fun f -> Filename(trim(f))) deps)  
-    and get_next_cmd buf = 
-      Printf.printf "%s\n" "get_next_cmd" ;
-      match !has_command with
-      | true -> 
-        read_for_quotes () ;
-        let start_index = String.index (Buffer.contents buf) '"' in
-        let end_index = String.index_from (Buffer.contents buf) start_index '"' in
-        let cmd = String.sub (Buffer.contents buf) start_index (start_index - end_index) in
-        let new_buffer_contents = String.sub (Buffer.contents buf) (end_index + 1) (String.length (Buffer.contents buf)) in
-        Buffer.clear buf ; add_line buf new_buffer_contents ; 
-        Printf.printf "new_buffer_contents : %s\n" new_buffer_contents ;
-        Command(cmd)
-      | false -> has_command := true ; Command("") in
-    while true do
-      Printf.printf "BUFFER:\t%s\n" (Buffer.contents buf) ;
-      let target = get_next_target buf in
-      let deps = get_next_deps buf in
-      let cmd = get_next_cmd buf in
-      prod_list := Production(target, deps, cmd)::(!prod_list)
-    done;  
-  with
-  | End_of_file -> if Buffer.contents buf = "" then () else raise (ParseException "Incomplete production."));
-  close_in f ; Program(!prod_list);;
-
-let program = parse_remodelfile () ;;  
+    if not (Sys.file_exists _HISTORY) 
+    then ignore (Sys.command ("touch "^_HISTORY)) else () ;
+  with 
+  | Unix.Unix_error(num,_,_) -> Printf.printf "Error in creating %s : %s\n" _HISTORY (Unix.error_message(num)) ; exit (-1)
+  | Sys_error(msg) -> Printf.printf "Error eminating from creating %s : %s\n" _HISTORY msg ; exit (-1));
+  (try
+    if not (Sys.file_exists _LOGDONE)
+    then Unix.mkdir _LOGDONE 0o755
+    else 
+      let logdir = Unix.opendir _LOGDONE in
+      try
+        while true 
+        do 
+          match Unix.readdir logdir with
+          | "." | ".." -> ()
+          | f -> Unix.unlink f
+        done;
+      with End_of_file -> ();
+      Unix.closedir logdir;
+  with 
+  | Unix.Unix_error(num,_,_) -> Printf.printf "Error in creating %s : %s\n" _LOGDONE (Unix.error_message(num)) ; exit (-1)
+  | Sys_error(msg) -> Printf.printf "Error eminating from creating %s : %s\n" _LOGDONE msg ; exit (-1));;
 
 (* program entry *)
 let args = Sys.argv in 
-  let target = match Array.length args with
+  prep_disk();
+  old_dependencies := get_old_dependencies() ;
+  let program = 
+    let f = open_in _REMODELFILE in
+    let p = Program(Remodel_parser.program Remodel_lexer.lexer (Lexing.from_channel f)) in
+    close_in f ; p 
+  and target = match Array.length args with
     | 1 -> Filename("DEFAULT") 
     | 2 -> Filename(args.(1))
     | _ ->  raise (TargetException "Multiple initial target values are not currently supported") in 
-(*  asdf (); *)
-  ignore(exec_parallel_commands example1 target) ;
- record_dependencies example1 ;; 
-
- 
+  ignore(exec_parallel_commands program target) ;
+  record_dependencies program 
+  ;; 
