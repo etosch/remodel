@@ -9,6 +9,15 @@ if [[ ! $remodel || ! $remodelfile ]] ; then
   exit -1
 fi
 
+if [ `which md5` ] ; then
+    md5=`which md5`
+elif [ `which md5sum` ] ; then
+    md5=`which md5sum`
+else 
+    echo "Neither md5 nor md5sum supported on the command line -- tests will be useless"
+    exit -1
+fi
+
 rm -rf tests
 echo "-------------------------------------------"
 echo "Making tests directory"
@@ -83,8 +92,8 @@ function test_case_1 {
     echo `$remodel 1> test1.out 2> test1.err`
     # grab md5s of bar.o and bar.cpp - these should not change after running
     # check whether this machine has md5 on it
-    bar1=`md5 -q bar.cpp`
-    foo1=`md5 -q foo.cpp`
+    bar1=`$md5 -q bar.cpp`
+    foo1=`$md5 -q foo.cpp`
     
     a=`wc -l test1.err | awk '{print $1}'`
 
@@ -110,9 +119,9 @@ test_case_1 linebreak_delimited_remodel
 
 sleep 3
 
-bar2=`md5 -q bar.o`
-foo2=`md5 -q foo.o`
-baz=`md5 -q baz`
+bar2=`$md5 -q bar.o`
+foo2=`$md5 -q foo.o`
+baz=`$md5 -q baz`
 
 
 #################### Test Case 2 #################### 
@@ -131,13 +140,13 @@ function test_case_2 {
 
     if [[ !( $a == 0 ) ]] ; then 
 	echo $output"FAIL -- executable had errors"
-    elif [[ !( $bar1 == `md5 -q bar.cpp` ) ]] ; then
+    elif [[ !( $bar1 == `$md5 -q bar.cpp` ) ]] ; then
 	echo $output"FAIL -- bar.cpp has changed"
-    elif [[ !( $bar2 == `md5 -q bar.o` ) ]] ; then
+    elif [[ !( $bar2 == `$md5 -q bar.o` ) ]] ; then
 	echo $output"FAIL -- bar.o has been re-compiled"
-    elif [[ !( $foo2 == `md5 -q foo.o` ) ]] ; then
+    elif [[ !( $foo2 == `$md5 -q foo.o` ) ]] ; then
 	echo $output"FAIL -- foo.o has been re-compiled"
-    elif [[ !( $baz == `md5 -q baz`) ]] ; then 
+    elif [[ !( $baz == `$md5 -q baz`) ]] ; then 
 	echo $output"FAIL -- baz has been rebuilt"
     else echo $output"PASS"
     fi
@@ -187,15 +196,15 @@ function test_case_3 {
 
     if [[ !( $a == 0 ) ]] ; then
 	echo $output"FAIL -- executable generated errors"
-    elif [[ !( `md5 -q bar.cpp` == $bar1 ) ]] ; then
+    elif [[ !( `$md5 -q bar.cpp` == $bar1 ) ]] ; then
 	echo $output"FAIL -- bar.cpp hash changed"
-    elif [[ !( `md5 -q bar.o` == $bar2 ) ]] ; then
+    elif [[ !( `$md5 -q bar.o` == $bar2 ) ]] ; then
 	echo $output"FAIL -- recompiled bar.o"
-    elif [[ `md5 -q foo.cpp` == $foo1 ]] ; then
+    elif [[ `$md5 -q foo.cpp` == $foo1 ]] ; then
 	echo $output"FAIL -- foo.cpp not changed"
-    elif [[ `md5 -q foo.o` == $foo2 ]] ; then
+    elif [[ `$md5 -q foo.o` == $foo2 ]] ; then
 	echo $output"FAIL -- foo.o not recompiled" 
-    elif [[ `md5 -q baz` == $baz ]] ; then
+    elif [[ `$md5 -q baz` == $baz ]] ; then
 	echo $output"FAIL -- baz not recompiled"
     else echo $output"PASS"
     fi
@@ -208,9 +217,9 @@ test_case_3 emmas_remodel
 test_case_3 linebreak_delimited_remodel
 sleep 3
 
-foo1=`md5 -q foo.cpp`
-foo2=`md5 -q foo.o`
-baz=`md5 -q baz`
+foo1=`$md5 -q foo.cpp`
+foo2=`$md5 -q foo.o`
+baz=`$md5 -q baz`
 
 #################### Test Case 4 #################### 
 function test_case_4 {
