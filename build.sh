@@ -89,7 +89,7 @@ function test_case_1 {
     rmf=$1
     output="Test case 1 : run DEFAULT for the first time..."
     mv $rmf $remodelfile
-    echo `$remodel 1> test1.out 2> test1.err`
+    $remodel 1> test1.out 2> test1.err
     # grab md5s of bar.o and bar.cpp - these should not change after running
     # check whether this machine has md5 on it
     bar1=`$md5 -q bar.cpp`
@@ -135,7 +135,7 @@ function test_case_2 {
 	rm foo.cpp
     fi
 
-    echo `$remodel bar.o 1> test2.out 2> test2.err`
+    $remodel bar.o 1> test2.out 2> test2.err
     a=`wc -l test2.err | awk '{print $1}'`
 
     if [[ !( $a == 0 ) ]] ; then 
@@ -167,7 +167,7 @@ function test_case_2_1 {
     mv $rmf $remodelfile
 
     output="Test case 2.1 : run remodel on DEFAULT (PASS means build failed)..."
-    echo `$remodel 1> test2.1.out 2> test2.1.err`
+    $remodel 1> test2.1.out 2> test2.1.err
     a=`wc -l test2.1.err | awk '{print $1}'`
     if [[ $a -gt 0 ]]
     then echo $output"PASS"
@@ -191,7 +191,7 @@ function test_case_3 {
     output="Test case 3 : rewrite foo.cpp and run remodel on DEFAULT..."
     printf "#include <iostream>\nvoid foo() { std::cout << \"Yo, foo!\"; }" > foo.cpp
 
-    echo `remodel 2> test3.err 1> test3.out`
+    remodel 2> test3.err 1> test3.out
     a=`wc -l test3.err | awk '{print $1}'`
 
     if [[ !( $a == 0 ) ]] ; then
@@ -228,7 +228,7 @@ function test_case_4 {
     mv $rmf $remodelfile
 
     output="Test case 4 : dual targets and a target with a command and no dependencies on existence.ml..."
-    echo `$remodel existence 2> test4.err 1> test4.out`
+    $remodel existence 2> test4.err 1> test4.out
     a=`wc -l test4.err | awk '{print $1}'`
     if [[ !( $a == 0 ) ]] ; then 
 	echo $output"FAIL -- executable generated errors"
@@ -258,7 +258,7 @@ function test_case_5 {
     oldtime=`ls -mtime do.sh | awk '{print $1}'`
     aoldtime=`ls -mtime a.txt | awk '{print $1}'`
 
-    echo `$remodel 2> test5.err 1> test5.out`
+    $remodel 2> test5.err 1> test5.out
     a=`wc -l test5.err | awk '{print $1}'`
 
     # should re-generate do.sh, but none of its children because the md5 hash should be the same
